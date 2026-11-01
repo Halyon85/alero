@@ -3,9 +3,8 @@ import SwiftUI
 
 // Las ventanitas de "Acomodar ventanas" (ver `Mosaico`), todas en el hilo principal y ninguna activa Alero:
 // - la vista previa: un rectángulo de vidrio con borde celeste, del tamaño exacto en que va a quedar la ventana;
-// - "¿Qué va acá?": el lugar libre marcado con un borde suave y, centrada en él, una tarjeta de vidrio esmerilado
-//   con un buscador, las apps abiertas arriba y todas las instaladas abajo, en orden alfabético (Esc o la X
-//   cancelan; un clic afuera de la tarjeta solo la cierra);
+// - "¿Qué va acá?": centrada en el lugar libre, una tarjeta de vidrio esmerilado con un buscador, las apps
+//   abiertas arriba y todas las instaladas abajo, en orden alfabético. La X, Esc o un clic afuera la cancelan;
 // - las barras: sobre la unión entre ventanas, una línea fina con una pastilla (o la perilla del cruce, con cuatro)
 //   que se arrastra; doble clic las centra. La franja que se agarra es más ancha que la línea y tapa los bordes con
 //   que macOS agranda las ventanas, así el clic lo toma la barra. Un clic en la pastilla abre un menú chico:
@@ -14,7 +13,8 @@ import SwiftUI
 //   nuevo al instante (las ventanas de verdad se mueven al soltar). Van entre las ventanas comunes y las barras, y
 //   son una capa de color, sin desenfoque: se redibujan en cada movimiento y tienen que ser livianas;
 // - el selector de formas: debajo del botón verde de una ventana, una tarjeta de vidrio con cuatro formas; cada
-//   parte de cada forma se ilumina al pasar el mouse y un clic pone la ventana ahí.
+//   parte de cada forma se ilumina al pasar el mouse y un clic pone la ventana ahí. Va por encima de todo: el menú
+//   propio de macOS aparece en el mismo lugar y lo tapaba.
 // Los rectángulos llegan en coordenadas de eventos (origen arriba) y se pasan a las de AppKit (origen abajo).
 
 final class PanelesMosaico {
@@ -50,6 +50,8 @@ final class PanelesMosaico {
 
     private var vistaPrevia: NSPanel?
     private var asistente: PanelAsistente?
+    /// Qué hacer si "¿Qué va acá?" se cancela (lo da `Mosaico`).
+    private var alCancelar: (() -> Void)?
     private var barras: [String: PanelBarra] = [:]
     private var cortinas: [CGWindowID: PanelCortina] = [:]
     private var quitando: DispatchWorkItem?
@@ -188,8 +190,12 @@ final class PanelesMosaico {
                           elegir: @escaping (AppsAbiertas.Candidata) -> Void, abrir: @escaping (URL) -> Void,
                           cancelar: @escaping () -> Void) {
         cerrarAsistente()
-        let marco = PanelesMosaico.aAppKit(r).insetBy(dx: 8, dy: 8)
+        // Solo la tarjeta, centrada en el lugar libre y con un tamaño cómodo de leer.
+        let lugar = PanelesMosaico.aAppKit(r)
+        let tamano = CGSize(width: min(lugar.width - 48, 700), height: min(lugar.height - 48, 620))
+        let marco = CGRect(x: lugar.midX - tamano.width / 2, y: lugar.midY - tamano.height / 2, width: tamano.width, height: tamano.height)
         let panel = PanelAsistente(marco: marco)
+        alCancelar = cancelar
         let vista = VistaAsistente(candidatas: candidatas, abiertas: abiertas) { [weak self] elegida in
             self?.cerrarAsistente()
             elegir(elegida)
@@ -204,19 +210,12 @@ final class PanelesMosaico {
             self?.cerrarAsistente()
             cancelar()
         }
-        // El lugar, con un tinte y un borde celeste suaves; la tarjeta, centrada y con un tamaño cómodo de leer.
-        let fondo = FondoAsistente(frame: CGRect(origin: .zero, size: marco.size))
-        fondo.alClic = { [weak self] in self?.cerrarAsistente() }
-        let tamano = CGSize(width: min(marco.width - 40, 700), height: min(marco.height - 40, 620))
-        let tarjeta = TarjetaVidrio(frame: CGRect(x: (marco.width - tamano.width) / 2, y: (marco.height - tamano.height) / 2,
-                                                  width: tamano.width, height: tamano.height))
-        tarjeta.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
+        let tarjeta = TarjetaVidrio(frame: CGRect(origin: .zero, size: tamano))
         let anfitrion = NSHostingView(rootView: vista)
         anfitrion.frame = tarjeta.bounds
         anfitrion.autoresizingMask = [.width, .height]
         tarjeta.addSubview(anfitrion)
-        fondo.addSubview(tarjeta)
-        panel.contentView = fondo
+        panel.contentView = tarjeta
         panel.alphaValue = 0
         // Toma el teclado (sin activar Alero) para el buscador y para que Esc la cierre.
         panel.makeKeyAndOrderFront(nil)
@@ -227,10 +226,19 @@ final class PanelesMosaico {
         asistente = panel
     }
 
-    /// Cierra sin deshacer nada (un clic afuera, o ya se eligió).
+    /// Cierra sin deshacer nada (ya se eligió).
     func cerrarAsistente() {
         asistente?.orderOut(nil)
         asistente = nil
+        alCancelar = nil
+    }
+
+    /// Un clic afuera: cierra y cancela, como la X o Esc (la ventana recién acomodada vuelve a como estaba).
+    func cancelarAsistente() {
+        guard asistente != nil else { return }
+        let cancelar = alCancelar
+        cerrarAsistente()
+        cancelar?()
     }
 
     // MARK: - Barras
@@ -297,28 +305,8 @@ private final class PanelAsistente: NSPanel {
     override func cancelOperation(_ sender: Any?) { cancelar?() }
 }
 
-/// El lugar libre de "¿Qué va acá?": un tinte oscuro suave con borde celeste. Un clic acá (afuera de la tarjeta)
-/// la cierra sin deshacer nada.
-private final class FondoAsistente: NSView {
-    var alClic: (() -> Void)?
-
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.22).cgColor
-        layer?.cornerRadius = 14
-        layer?.borderWidth = 1.5
-        layer?.borderColor = NSColor(hex: 0x8FD8FF).withAlphaComponent(0.55).cgColor
-        autoresizingMask = [.width, .height]
-    }
-
-    required init?(coder: NSCoder) { nil }
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func mouseDown(with event: NSEvent) { alClic?() }
-}
-
-/// La tarjeta de vidrio esmerilado de "¿Qué va acá?". Se queda con sus clics (si no, subirían al fondo y la cerrarían).
+/// La tarjeta de vidrio esmerilado de "¿Qué va acá?" (y del selector de formas). Se queda con los clics que caen
+/// entre sus botones, así no pasan a la ventana de abajo.
 private final class TarjetaVidrio: NSVisualEffectView {
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -612,7 +600,12 @@ private final class MenuBarra {
 /// El selector de formas del botón verde. Se esconde un momento después de que el mouse sale del botón y de la
 /// tarjeta, con un clic en cualquier otro lado o al elegir.
 private final class SelectorFormas {
-    private let panel = PanelesMosaico.panelFlotante()
+    private let panel: NSPanel = {
+        let panel = PanelesMosaico.panelFlotante()
+        // Por encima del menú propio de macOS del botón verde, que aparece en el mismo lugar.
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue + 1)
+        return panel
+    }()
     private var espera: DispatchWorkItem?
     private var encima = false
 

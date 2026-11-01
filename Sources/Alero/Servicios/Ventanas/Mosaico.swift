@@ -6,8 +6,8 @@ import Combine
 //   pantalla (mientras la llevás, una vista previa muestra exactamente dónde va a quedar). En un borde que da a otra
 //   pantalla el puntero se pasaría de largo: ahí cuenta una franja más ancha, quedándose un momento;
 // - en lo que queda libre, "¿Qué va acá?" ofrece todas las apps abiertas (también minimizadas, ocultas o sin
-//   ventana) y un buscador que también encuentra las instaladas que no están abiertas. Cancelarlo con la X o Esc
-//   devuelve la primera ventana a como estaba;
+//   ventana) y un buscador que también encuentra las instaladas que no están abiertas. Cancelarlo (la X, Esc o un
+//   clic afuera) devuelve la primera ventana a como estaba;
 // - una ventana nueva en un cuarto de una columna ocupada por una mitad parte la columna (entra una tercera app);
 // - las ventanas quedan pegadas y sobre la unión hay una barra siempre a la vista. Mientras la arrastrás, cada
 //   ventana queda tapada por una cortina (vidrio con el ícono de su app) que va a su lugar nuevo al instante, y las
@@ -130,10 +130,10 @@ final class Mosaico {
 
     // MARK: - Llevar una ventana a un borde
 
-    /// Un clic en otra app cierra "¿Qué va acá?" (sin deshacer nada) y, si fue en la barra de arriba de una ventana,
+    /// Un clic en otra app cancela "¿Qué va acá?" (como la X) y, si fue en la barra de arriba de una ventana,
     /// puede ser el comienzo de un arrastre (se confirma en `seguir`, cuando la ventana se corre sin cambiar de tamaño).
     private func empezar(en p: CGPoint) {
-        paneles.cerrarAsistente()
+        paneles.cancelarAsistente()
         paneles.ocultarMenu()
         paneles.ocultarSelector()
         arrastre = nil

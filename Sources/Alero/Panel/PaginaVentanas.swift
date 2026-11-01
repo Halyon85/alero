@@ -43,8 +43,8 @@ struct PaginaVentanas: View {
                  T("Ocupa toda la pantalla, sin pasar a pantalla completa.", "It fills the screen, without going full screen."),
                  icono: "rectangle.inset.filled")
             paso(T("El lugar que queda", "The spot that's left"),
-                 T("Aparecen todas tus apps abiertas y un buscador para abrir otra: tocás una y va ahí. Con la X o Esc, la ventana vuelve a como estaba.",
-                   "All your open apps show up, plus a search to open another: click one and it goes there. With the X or Esc, the window goes back to how it was."),
+                 T("Aparecen todas tus apps abiertas y un buscador para abrir otra: tocás una y va ahí. Si cancelás (la X, Esc o un clic afuera), la ventana vuelve a como estaba.",
+                   "All your open apps show up, plus a search to open another: click one and it goes there. If you cancel (the X, Esc or a click outside), the window goes back to how it was."),
                  icono: "square.grid.2x2")
             paso(T("Una app más", "One more app"),
                  T("Con la pantalla en dos mitades, llevá la tercera a una esquina: la de ese lado pasa al otro cuarto.",
