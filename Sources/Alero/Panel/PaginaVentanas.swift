@@ -1,9 +1,9 @@
 import AppKit
 import SwiftUI
 
-// Herramientas › Ventanas: la llave de "Acomodar ventanas" (`Mosaico`), cómo se usa y, si macOS 15 también acomoda
-// ventanas al arrastrarlas a los costados o a la barra de menús, un aviso para apagar lo de macOS (los dos a la vez
-// se pisan). Los nombres del aviso son los de Ajustes del Sistema › Escritorio y Dock › Ventanas, tal cual.
+// Herramientas › Ventanas: la llave de "Acomodar ventanas" (`Mosaico`) y cómo se usa. Al prenderla, Alero apaga el
+// acomodo propio de macOS 15 (`MosaicoDeMacOS`); si igual quedó prendido (se volvió a prender a mano), un aviso dice
+// cómo apagarlo, con los nombres de Ajustes del Sistema › Escritorio y Dock › Ventanas tal cual.
 
 struct PaginaVentanas: View {
     @ObservedObject private var ajustes = Ajustes.shared
@@ -17,8 +17,8 @@ struct PaginaVentanas: View {
         AvisoAccesibilidad()
         Tarjeta(titulo: T("Acomodar ventanas", "Arrange windows")) {
             FilaLlave(titulo: T("Acomodar ventanas", "Arrange windows"),
-                      detalle: T("Llevá una ventana contra un borde o una esquina de la pantalla y Alero la acomoda.",
-                                 "Drag a window against an edge or a corner of the screen and Alero arranges it."),
+                      detalle: T("Llevá una ventana contra un borde o una esquina de la pantalla y Alero la acomoda. Mientras está prendido, Alero apaga el acomodo propio de macOS y, al apagarlo, lo deja como estaba.",
+                                 "Drag a window against an edge or a corner of the screen and Alero arranges it. While it's on, Alero turns off macOS's own tiling and puts it back as it was when you turn this off."),
                       divisor: false, valor: $ajustes.mosaico)
         }
         if ajustes.mosaico && deMacOS {
@@ -51,23 +51,5 @@ struct PaginaVentanas: View {
         Fila(titulo: titulo, detalle: detalle, divisor: divisor) {
             Image(systemName: icono).font(.system(size: 18, weight: .regular)).foregroundStyle(Tema.acentoVentana).frame(width: 28)
         }
-    }
-}
-
-/// El acomodo de ventanas propio de macOS 15 y más nuevos, prendido de fábrica: arrastrarlas a los costados
-/// (`EnableTilingByEdgeDrag`) o a la barra de menús (`EnableTopTilingByEdgeDrag`). El de mantener ⌥ no se pisa con
-/// Alero y no cuenta.
-enum MosaicoDeMacOS {
-    static var prendido: Bool {
-        guard #available(macOS 15, *) else { return false }
-        let dominio = "com.apple.WindowManager" as CFString
-        CFPreferencesAppSynchronize(dominio)
-        return ["EnableTilingByEdgeDrag", "EnableTopTilingByEdgeDrag"].contains { clave in
-            CFPreferencesCopyAppValue(clave as CFString, dominio) as? Bool ?? true
-        }
-    }
-
-    static func abrirAjustes() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.Desktop-Settings.extension") { NSWorkspace.shared.open(url) }
     }
 }

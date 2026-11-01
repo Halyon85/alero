@@ -67,12 +67,14 @@ final class Mosaico {
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
         guard prender else {
+            MosaicoDeMacOS.devolver()
             arrastre = nil
             grupos = []
             vigilar()
             paneles.cerrarTodo()
             return
         }
+        MosaicoDeMacOS.apagar()
         monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .mouseMoved]) { [weak self] evento in
             self?.recibir(evento)
         }
@@ -352,17 +354,21 @@ struct VentanaVisible: Identifiable, Equatable {
 /// La lista de ventanas del servidor de ventanas (sin Accesibilidad: es barata). Cualquier hilo.
 enum VentanasVisibles {
     /// Las ventanas comunes a la vista en este escritorio, de adelante hacia atrás, sin las de Alero ni del Dock.
+    /// Solo las que tocan alguna pantalla: hay apps que guardan una ventana escondida lejos (Dixity, en -20000).
     static func todas() -> [VentanaVisible] {
-        lista().compactMap { comun($0) }
+        let pantallas = Pantallas.shared.actuales
+        return lista().compactMap { comun($0) }.filter { v in pantallas.contains { $0.marco.intersects(v.marco) } }
     }
 
-    /// La ventana común que está más adelante en `p`, o nil si lo de más adelante es otra cosa (un menú, el Dock,
-    /// el notch).
+    /// La ventana común que está más adelante en `p`, o nil si lo de más adelante es otra cosa (un menú, la barra
+    /// de menús). Las ventanas de Alero no cuentan: la del notch es invisible, no recibe clics y ocupa una franja
+    /// ancha arriba de cada pantalla (justo donde están las barras de título de las ventanas grandes).
     static func bajo(_ p: CGPoint) -> VentanaVisible? {
         for info in lista() {
             guard let marco = marcoDeVentana(info), marco.contains(p) else { continue }
             let alfa = (info[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1
             if alfa == 0 { continue }
+            if (info[kCGWindowOwnerPID as String] as? NSNumber).map({ Int64($0.int32Value) == MarcaPropia.proceso }) == true { continue }
             // La ventana transparente del Dock en macOS 26 (ver `BotonVerde.ventanaCandidata`) no tapa nada.
             if info[kCGWindowOwnerName as String] as? String == "Dock" { continue }
             return comun(info)
@@ -390,5 +396,56 @@ enum VentanasVisibles {
         let app = info[kCGWindowOwnerName as String] as? String ?? ""
         if app == "Dock" { return nil }
         return VentanaVisible(id: id, pid: pid, marco: marco, app: app, titulo: info[kCGWindowName as String] as? String ?? "")
+    }
+}
+
+// MARK: - El acomodo propio de macOS
+
+/// El acomodo de ventanas de macOS 15 y más nuevos, prendido de fábrica: arrastrarlas a los costados
+/// (`EnableTilingByEdgeDrag`) o a la barra de menús (`EnableTopTilingByEdgeDrag`). Con los dos a la vez, cada uno
+/// muestra su vista previa y acomoda a su manera: por eso `Mosaico` lo apaga al prenderse y lo devuelve como estaba al
+/// apagarse. El de mantener ⌥ no se pisa con Alero y no se toca.
+enum MosaicoDeMacOS {
+    private static let dominio = "com.apple.WindowManager" as CFString
+    private static let claves = ["EnableTilingByEdgeDrag", "EnableTopTilingByEdgeDrag"]
+    /// Cómo estaban las dos opciones antes de que Alero las apagara (en los ajustes de Alero).
+    private static let antes = "ventanas.macOSAntes"
+
+    /// Si alguna de las dos sigue prendida (la página lo avisa).
+    static var prendido: Bool {
+        guard #available(macOS 15, *) else { return false }
+        CFPreferencesAppSynchronize(dominio)
+        return claves.contains(where: valor)
+    }
+
+    /// Al prender "Acomodar ventanas" (y al abrir Alero con eso prendido): anota cómo estaban, la primera vez, y las apaga.
+    static func apagar() {
+        guard #available(macOS 15, *) else { return }
+        CFPreferencesAppSynchronize(dominio)
+        if UserDefaults.standard.dictionary(forKey: antes) == nil {
+            UserDefaults.standard.set(Dictionary(uniqueKeysWithValues: claves.map { ($0, valor($0)) }), forKey: antes)
+        }
+        claves.forEach { escribir($0, false) }
+    }
+
+    /// Al apagar "Acomodar ventanas": las deja como estaban antes de que Alero las tocara.
+    static func devolver() {
+        guard let guardado = UserDefaults.standard.dictionary(forKey: antes) as? [String: Bool] else { return }
+        for (clave, valor) in guardado where claves.contains(clave) { escribir(clave, valor) }
+        UserDefaults.standard.removeObject(forKey: antes)
+    }
+
+    static func abrirAjustes() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.Desktop-Settings.extension") { NSWorkspace.shared.open(url) }
+    }
+
+    /// Sin la clave guardada, macOS la toma como prendida.
+    private static func valor(_ clave: String) -> Bool {
+        CFPreferencesCopyAppValue(clave as CFString, dominio) as? Bool ?? true
+    }
+
+    private static func escribir(_ clave: String, _ valor: Bool) {
+        CFPreferencesSetAppValue(clave as CFString, valor as CFBoolean, dominio)
+        CFPreferencesAppSynchronize(dominio)
     }
 }
