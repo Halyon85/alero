@@ -8,9 +8,10 @@ import SwiftUI
 // - las barras: sobre la unión entre ventanas, una línea fina con una pastilla (o la perilla del cruce, con cuatro)
 //   que se arrastra; doble clic las centra. La franja que se agarra es más ancha que la línea y tapa los bordes con
 //   que macOS agranda las ventanas, así el clic lo toma la barra. Un clic en la pastilla abre un menú chico:
-//   "Cambiar", "Al medio", "Sumar app" y "Salir";
+//   "Cambiar", "Al medio", "Sumar app", "Quitar app" (elegís cuál) y "Salir";
 // - las cortinas: mientras se arrastra una barra, un vidrio con el ícono de la app tapa cada ventana y va a su lugar
-//   nuevo al instante (las ventanas de verdad se mueven al soltar). Van entre las ventanas comunes y las barras.
+//   nuevo al instante (las ventanas de verdad se mueven al soltar). Van entre las ventanas comunes y las barras, y
+//   son una capa de color, sin desenfoque: se redibujan en cada movimiento y tienen que ser livianas.
 // Los rectángulos llegan en coordenadas de eventos (origen arriba) y se pasan a las de AppKit (origen abajo).
 
 final class PanelesMosaico {
@@ -26,7 +27,15 @@ final class PanelesMosaico {
         let cambiar: (() -> Void)?
         /// Nil con cuatro ventanas (no entra otra).
         let sumar: (() -> Void)?
+        /// Las ventanas del grupo, para "Quitar app".
+        let apps: [AppDelGrupo]
+        let quitar: (CGWindowID) -> Void
         let salir: () -> Void
+    }
+
+    struct AppDelGrupo: Identifiable {
+        let id: CGWindowID
+        let pid: pid_t
     }
 
     /// Una ventana tapada mientras se arrastra: dónde tiene que estar ya.
@@ -279,7 +288,7 @@ private final class PanelBarra: NSPanel {
     }
 }
 
-/// Una cortina: vidrio oscuro con el ícono y el nombre de la app, centrados. No recibe clics.
+/// Una cortina: un panel oscuro con el ícono y el nombre de la app, centrados. No recibe clics.
 private final class PanelCortina: NSPanel {
     init(pid: pid_t) {
         super.init(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -293,16 +302,12 @@ private final class PanelCortina: NSPanel {
         isReleasedWhenClosed = false
         animationBehavior = .none
         ignoresMouseEvents = true
-        let vidrio = NSVisualEffectView()
-        vidrio.material = .hudWindow
-        vidrio.blendingMode = .behindWindow
-        vidrio.state = .active
-        vidrio.appearance = NSAppearance(named: .darkAqua)
+        let vidrio = NSView()
         vidrio.wantsLayer = true
+        vidrio.layer?.backgroundColor = NSColor(hex: 0x1C1D22).withAlphaComponent(0.97).cgColor
         vidrio.layer?.cornerRadius = 10
-        vidrio.layer?.masksToBounds = true
         vidrio.layer?.borderWidth = 1
-        vidrio.layer?.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
+        vidrio.layer?.borderColor = NSColor.white.withAlphaComponent(0.10).cgColor
         let app = NSRunningApplication(processIdentifier: pid)
         let icono = NSImageView(image: app?.icon ?? NSWorkspace.shared.icon(for: .application))
         icono.imageScaling = .scaleProportionallyUpOrDown
@@ -358,8 +363,8 @@ private final class VistaBarra: NSView {
     /// Las pastillas, en coordenadas de la vista.
     private var rectsPastillas: [CGRect] {
         if tipo == .cruce { return [bounds.insetBy(dx: 4, dy: 4)] }
-        let largo: CGFloat = 64
-        let grueso: CGFloat = 6
+        let largo: CGFloat = 56
+        let grueso: CGFloat = 5
         return pastillas.map { f in
             vertical
                 ? CGRect(x: bounds.midX - grueso / 2, y: bounds.height * f - largo / 2, width: grueso, height: largo)
@@ -393,9 +398,9 @@ private final class VistaBarra: NSView {
             return
         }
         // La línea fina sobre la unión.
-        let linea = vertical ? CGRect(x: bounds.midX - 1, y: 0, width: 2, height: bounds.height)
-                             : CGRect(x: 0, y: bounds.midY - 1, width: bounds.width, height: 2)
-        NSColor.black.withAlphaComponent(arrastrando ? 0.7 : 0.45).setFill()
+        let linea = vertical ? CGRect(x: bounds.midX - 0.5, y: 0, width: 1, height: bounds.height)
+                             : CGRect(x: 0, y: bounds.midY - 0.5, width: bounds.width, height: 1)
+        NSColor.black.withAlphaComponent(arrastrando ? 0.6 : 0.35).setFill()
         linea.fill()
         for (i, pastilla) in rectsPastillas.enumerated() {
             NSGraphicsContext.saveGraphicsState()
@@ -473,11 +478,15 @@ private final class VistaBarra: NSView {
 
 // MARK: - Menú de la pastilla
 
-/// El menú chico que abre un clic en una pastilla: "Cambiar", "Al medio", "Sumar app" y "Salir". Se cierra con un
-/// botón, con otro clic en la pastilla, al arrastrar la barra o con un clic en cualquier otro lado (`Mosaico`).
+/// El menú chico que abre un clic en una pastilla: "Cambiar", "Al medio", "Sumar app", "Quitar app" y "Salir".
+/// "Quitar app" cambia el menú por las apps del grupo, para elegir cuál sale. Se cierra con un botón, con otro clic
+/// en la pastilla, al arrastrar la barra o con un clic en cualquier otro lado (`Mosaico`).
 private final class MenuBarra {
     private let panel = PanelesMosaico.panelFlotante()
     private(set) var clave: String?
+    private var anfitrion: NSView?
+    private var ancla = CGPoint.zero
+    private var horizontal = false
 
     /// Lo abre junto a la pastilla tocada; si ya estaba abierto para esa barra, lo cierra.
     func alternar(_ pedido: PanelesMosaico.Pedido, cerca centro: CGPoint) {
@@ -486,33 +495,44 @@ private final class MenuBarra {
             return
         }
         clave = pedido.clave
+        ancla = centro
+        if case .horizontal = pedido.barra.tipo { horizontal = true } else { horizontal = false }
         let cerrarY: (@escaping () -> Void) -> () -> Void = { accion in { [weak self] in
             self?.ocultar()
             accion()
         } }
         let vista = VistaMenuBarra(tipo: pedido.barra.tipo, cambiar: pedido.cambiar.map(cerrarY), centrar: cerrarY(pedido.centrar),
-                                   sumar: pedido.sumar.map(cerrarY), salir: cerrarY(pedido.salir))
+                                   sumar: pedido.sumar.map(cerrarY), apps: pedido.apps,
+                                   quitar: { [weak self] id in
+                                       self?.ocultar()
+                                       pedido.quitar(id)
+                                   },
+                                   salir: cerrarY(pedido.salir),
+                                   alCambiar: { [weak self] in DispatchQueue.main.async { self?.ubicar() } })
         let anfitrion = AnfitrionPrimerClic(rootView: vista)
-        let tamano = anfitrion.fittingSize
+        self.anfitrion = anfitrion
         panel.contentView = anfitrion
-        // Arriba de la pastilla en las verticales y el cruce; a la derecha en las horizontales. Sin salirse de la pantalla.
-        var origen: CGPoint
-        if case .horizontal = pedido.barra.tipo {
-            origen = CGPoint(x: centro.x + 44, y: centro.y - tamano.height / 2)
-        } else {
-            origen = CGPoint(x: centro.x - tamano.width / 2, y: centro.y + 44)
-        }
-        if let pantalla = NSScreen.screens.first(where: { $0.frame.contains(centro) })?.visibleFrame {
-            origen.x = min(max(origen.x, pantalla.minX + 8), pantalla.maxX - tamano.width - 8)
-            origen.y = min(max(origen.y, pantalla.minY + 8), pantalla.maxY - tamano.height - 8)
-        }
-        panel.setFrame(CGRect(origin: origen, size: tamano), display: true)
+        ubicar()
         panel.alphaValue = 0
         panel.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { contexto in
             contexto.duration = 0.12
             panel.animator().alphaValue = 1
         }
+    }
+
+    /// Arriba de la pastilla en las verticales y el cruce; a la derecha en las horizontales; sin salirse de la
+    /// pantalla. Se vuelve a llamar cuando el menú cambia de tamaño ("Quitar app").
+    private func ubicar() {
+        guard let anfitrion else { return }
+        let tamano = anfitrion.fittingSize
+        var origen = horizontal ? CGPoint(x: ancla.x + 44, y: ancla.y - tamano.height / 2)
+                                : CGPoint(x: ancla.x - tamano.width / 2, y: ancla.y + 44)
+        if let pantalla = NSScreen.screens.first(where: { $0.frame.contains(ancla) })?.visibleFrame {
+            origen.x = min(max(origen.x, pantalla.minX + 8), pantalla.maxX - tamano.width - 8)
+            origen.y = min(max(origen.y, pantalla.minY + 8), pantalla.maxY - tamano.height - 8)
+        }
+        panel.setFrame(CGRect(origin: origen, size: tamano), display: true)
     }
 
     func ocultar() {
@@ -531,20 +551,35 @@ private struct VistaMenuBarra: View {
     let cambiar: (() -> Void)?
     let centrar: () -> Void
     let sumar: (() -> Void)?
+    let apps: [PanelesMosaico.AppDelGrupo]
+    let quitar: (CGWindowID) -> Void
     let salir: () -> Void
+    /// El menú cambió de tamaño (pasó a elegir qué app quitar, o volvió).
+    let alCambiar: () -> Void
+    @State private var quitando = false
 
     var body: some View {
         HStack(spacing: 4) {
-            if let cambiar {
-                boton(T("Cambiar", "Swap"), icono: tipo == .vertical ? "arrow.left.arrow.right" : "arrow.up.arrow.down", accion: cambiar)
+            if quitando {
+                boton(T("Volver", "Back"), icono: "chevron.left") { cambiarModo(false) }
+                Rectangle().fill(Color.white.opacity(0.15)).frame(width: 1, height: 30)
+                ForEach(apps) { app in
+                    let corriendo = NSRunningApplication(processIdentifier: app.pid)
+                    BotonMenuBarra(texto: corriendo?.localizedName ?? "", icono: nil, imagen: corriendo?.icon) { quitar(app.id) }
+                }
+            } else {
+                if let cambiar {
+                    boton(T("Cambiar", "Swap"), icono: tipo == .vertical ? "arrow.left.arrow.right" : "arrow.up.arrow.down", accion: cambiar)
+                }
+                boton(T("Al medio", "Center"), icono: tipo == .cruce ? "plus" : (tipo == .vertical ? "arrow.left.and.right" : "arrow.up.and.down"),
+                      accion: centrar)
+                if let sumar {
+                    boton(T("Sumar app", "Add app"), icono: "plus.rectangle.on.rectangle", accion: sumar)
+                }
+                boton(T("Quitar app", "Remove app"), icono: "minus.rectangle") { cambiarModo(true) }
+                Rectangle().fill(Color.white.opacity(0.15)).frame(width: 1, height: 30)
+                boton(T("Salir", "Exit"), icono: "xmark", accion: salir)
             }
-            boton(T("Al medio", "Center"), icono: tipo == .cruce ? "plus" : (tipo == .vertical ? "arrow.left.and.right" : "arrow.up.and.down"),
-                  accion: centrar)
-            if let sumar {
-                boton(T("Sumar app", "Add app"), icono: "plus.rectangle.on.rectangle", accion: sumar)
-            }
-            Rectangle().fill(Color.white.opacity(0.15)).frame(width: 1, height: 30)
-            boton(T("Salir", "Exit"), icono: "xmark", accion: salir)
         }
         .padding(6)
         .background(Color(white: 0.1).opacity(0.94), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -553,22 +588,33 @@ private struct VistaMenuBarra: View {
         .fixedSize()
     }
 
+    private func cambiarModo(_ quitar: Bool) {
+        quitando = quitar
+        alCambiar()
+    }
+
     private func boton(_ texto: String, icono: String, accion: @escaping () -> Void) -> some View {
-        BotonMenuBarra(texto: texto, icono: icono, accion: accion)
+        BotonMenuBarra(texto: texto, icono: icono, imagen: nil, accion: accion)
     }
 }
 
+/// Un botón del menú: un símbolo (o el ícono de una app, en "Quitar app") con su nombre abajo.
 private struct BotonMenuBarra: View {
     let texto: String
-    let icono: String
+    let icono: String?
+    let imagen: NSImage?
     let accion: () -> Void
     @State private var encima = false
 
     var body: some View {
         Button(action: accion) {
             VStack(spacing: 3) {
-                Image(systemName: icono).font(.system(size: 13, weight: .semibold))
-                Text(texto).font(.system(size: 10, weight: .medium))
+                if let imagen {
+                    Image(nsImage: imagen).resizable().frame(width: 20, height: 20)
+                } else if let icono {
+                    Image(systemName: icono).font(.system(size: 13, weight: .semibold))
+                }
+                Text(texto).font(.system(size: 10, weight: .medium)).lineLimit(1)
             }
             .frame(width: 58, height: 42)
             .background(Color.white.opacity(encima ? 0.14 : 0), in: RoundedRectangle(cornerRadius: 9, style: .continuous))

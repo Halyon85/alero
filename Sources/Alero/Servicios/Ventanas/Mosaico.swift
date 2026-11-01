@@ -15,12 +15,14 @@ import Combine
 //   los saltos, porque cada una tarda distinto en redibujarse. Doble clic la centra. Con cuatro, en el cruce hay una
 //   perilla que va en diagonal. Un clic en la pastilla abre "Cambiar" (de lado), "Al medio", "Sumar app" y "Salir"
 //   (todas vuelven a como estaban). Si estirás una ventana desde su borde o su esquina, las demás se tapan y la siguen;
-// - sacar una ventana del grupo (arrastrándola) la devuelve a su tamaño de antes, y si de un grupo queda una sola
-//   (cerraste o minimizaste la otra), esa también vuelve a como estaba.
+// - una ventana sale del grupo si la arrastrás afuera (vuelve a su tamaño de antes), la cerrás, la minimizás o la
+//   quitás desde el menú ("Quitar app": vuelve a como estaba). Las que quedan se agrandan para no dejar huecos, y
+//   si queda una sola, el acomodo se termina y esa también vuelve a como estaba. Si una app se corre sola unos
+//   puntos (WhatsApp lo hace al cambiar de tamaño), no sale: vuelve a su lugar.
 // El mouse se mira con escuchas globales de AppKit, que solo leen: nunca frenan ni cambian un clic. Lo de
 // Accesibilidad va en `AX.cola`; el resto, en el hilo principal. Las cuentas están en `ReglasMosaico` y las
 // ventanitas (vista previa, "¿Qué va acá?" y barras) en `PanelesMosaico`. Una ventana sale de su grupo si la movés a
-// mano, la cerrás, la minimizás o la ocultás.
+// afuera, la cerrás, la minimizás o la ocultás.
 
 final class Mosaico {
     static let shared = Mosaico()
@@ -235,18 +237,47 @@ final class Mosaico {
         ofrecerLibre(grupos[i], deshacer: nuevo && quedan.isEmpty ? miembro : nil)
     }
 
-    /// Una ventana del grupo que se empezó a arrastrar sale y vuelve a su tamaño de antes (sigue en la mano).
+    /// Una ventana del grupo que se empezó a arrastrar sale y vuelve a su tamaño de antes (sigue en la mano); las
+    /// demás se agrandan para no dejar huecos.
     private func sacarAlArrastrar(_ id: CGWindowID) {
-        for i in grupos.indices {
-            guard let m = grupos[i].miembros.first(where: { $0.id == id }) else { continue }
-            grupos[i].miembros.removeAll { $0.id == id }
-            var tamano = m.antes.size
+        guard let grupo = grupos.first(where: { g in g.miembros.contains { $0.id == id } }),
+              let m = grupo.miembros.first(where: { $0.id == id }) else { return }
+        var tamano = m.antes.size
+        AX.cola.async {
+            if let valor = AXValueCreate(.cgSize, &tamano) { AX.poner(m.ventana, kAXSizeAttribute, valor) }
+        }
+        quitarDelGrupo(id, en: grupo.pantalla, devolver: false)
+    }
+
+    /// Saca una ventana de su grupo. Las que quedan se agrandan (`ReglasMosaico.quitar`); si queda una sola, el
+    /// acomodo se termina y vuelve a como estaba. `devolver`: la que sale también vuelve a como estaba ("Quitar app")
+    /// y las del grupo se traen adelante, así no quedan tapadas.
+    private func quitarDelGrupo(_ id: CGWindowID, en pantalla: PantallaCG, devolver: Bool) {
+        guard let i = grupos.firstIndex(where: { $0.pantalla == pantalla }),
+              let k = grupos[i].miembros.firstIndex(where: { $0.id == id }) else { return }
+        let quitado = grupos[i].miembros.remove(at: k)
+        if grupos[i].miembros.count <= 1 {
+            let restantes = grupos[i].miembros
+            grupos.remove(at: i)
+            vigilar()
+            mostrarBarras(visibles: VentanasVisibles.todas())
             AX.cola.async {
-                if let valor = AXValueCreate(.cgSize, &tamano) { AX.poner(m.ventana, kAXSizeAttribute, valor) }
+                for m in restantes { Mosaico.ponerMarco(m.ventana, pid: m.pid, m.antes) }
+                if devolver { Mosaico.ponerMarco(quitado.ventana, pid: quitado.pid, quitado.antes) }
+            }
+            return
+        }
+        let zonas = ReglasMosaico.quitar(quitado.zona, quedan: grupos[i].miembros.map(\.zona))
+        for (j, zona) in zonas.enumerated() { grupos[i].miembros[j].zona = zona }
+        let quedan = grupos[i].miembros
+        if devolver {
+            AX.cola.async {
+                Mosaico.ponerMarco(quitado.ventana, pid: quitado.pid, quitado.antes)
+                for m in quedan { AXUIElementPerformAction(m.ventana, kAXRaiseAction as CFString) }
             }
         }
-        grupos.removeAll { $0.miembros.isEmpty }
-        vigilar()
+        cubrir(grupos[i])
+        aplicar(pantalla, quitarCortinas: true)
     }
 
     /// Cada 0,3 s, mientras haya grupos: las barras se muestran donde se ven las dos ventanas; las que ya no están a
@@ -268,40 +299,29 @@ final class Mosaico {
         var marcos: [CGWindowID: CGRect] = [:]
         for v in visibles { marcos[v.id] = v.marco }
         // Con el botón apretado la persona puede estar estirando una ventana: se mira cuando la suelta.
-        var aplicarEn: [PantallaCG] = []
         if NSEvent.pressedMouseButtons == 0 {
+            // Las que ya no están a la vista (cerradas, minimizadas u ocultas) salen, y las demás se agrandan.
+            let idos = grupos.flatMap { g in g.miembros.filter { marcos[$0.id] == nil }.map { (id: $0.id, pantalla: g.pantalla) } }
+            for ido in idos { quitarDelGrupo(ido.id, en: ido.pantalla, devolver: false) }
+            var aplicarEn: [PantallaCG] = []
             for i in grupos.indices {
                 var g = grupos[i]
-                let antes = g.miembros.count
-                var desaparecio = false
-                g.miembros.removeAll { m in
-                    guard let marco = marcos[m.id] else { desaparecio = true; return true }
-                    if Geometria.parecidos(marco, m.quedo, tolerancia: 6) { return false }
-                    // Se corrió sin cambiar de tamaño: la movieron a mano.
-                    return abs(marco.width - m.quedo.width) < 2 && abs(marco.height - m.quedo.height) < 2
-                }
-                // Cerraste o minimizaste una y quedó una sola: ya no hay nada que acomodar, vuelve a como estaba.
-                if antes >= 2, desaparecio, g.miembros.count == 1 {
-                    let sola = g.miembros[0]
-                    g.miembros = []
-                    AX.cola.async { Mosaico.colocar(sola.ventana, pid: sola.pid, en: sola.antes) { _ in } }
-                }
                 for j in g.miembros.indices {
                     let m = g.miembros[j]
                     guard let marco = marcos[m.id], !Geometria.parecidos(marco, m.quedo, tolerancia: 6) else { continue }
                     if let nuevas = ReglasMosaico.divisiones(siCambio: m.zona, a: marco, ocupadas: g.ocupadas,
                                                              en: g.pantalla.visible, divisiones: g.divisiones) {
+                        // La estiraron desde un borde de adentro: las demás la siguen.
                         g.divisiones = nuevas
-                        if !aplicarEn.contains(g.pantalla) { aplicarEn.append(g.pantalla) }
+                        g.miembros[j].quedo = marco
                     }
-                    // Cambió por afuera (o la app se negó): se la toma como está.
-                    g.miembros[j].quedo = marco
+                    // Si se corrió sola (o cambió por afuera), vuelve a su lugar.
+                    if !aplicarEn.contains(g.pantalla) { aplicarEn.append(g.pantalla) }
                 }
                 grupos[i] = g
             }
-            grupos.removeAll { $0.miembros.isEmpty }
+            aplicarEn.forEach { aplicar($0) }
         }
-        aplicarEn.forEach { aplicar($0) }
         mostrarBarras(visibles: visibles)
         vigilar()
     }
@@ -342,6 +362,8 @@ final class Mosaico {
                     centrar: { [weak self] in self?.centrarBarra(tipo, en: pantalla) },
                     cambiar: tipo == .cruce ? nil : { [weak self] in self?.cambiarDeLado(tipo, en: pantalla) },
                     sumar: grupo.miembros.count < 4 ? { [weak self] in self?.sumarApp(pantalla) } : nil,
+                    apps: grupo.miembros.map { PanelesMosaico.AppDelGrupo(id: $0.id, pid: $0.pid) },
+                    quitar: { [weak self] id in self?.quitarDelGrupo(id, en: pantalla, devolver: true) },
                     salir: { [weak self] in self?.salir(pantalla) }))
             }
         }

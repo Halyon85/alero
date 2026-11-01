@@ -184,6 +184,24 @@ enum ReglasMosaico {
         return nil
     }
 
+    /// Al sacar una ventana del grupo, cómo quedan las demás (en el mismo orden) para no dejar huecos: si sale un
+    /// cuarto, el otro de su columna pasa a ser la mitad; si sale una mitad y del otro lado había dos cuartos, esos
+    /// pasan a ser las dos mitades (la de arriba a la izquierda). Con una sola, el grupo se termina (`Mosaico`).
+    static func quitar(_ zona: ZonaMosaico, quedan: [ZonaMosaico]) -> [ZonaMosaico] {
+        guard let columna = zona.columna else { return quedan }
+        if zona.esCuarto {
+            let pareja: ZonaMosaico = zona.deArriba ? (columna == .izquierda ? .abajoIzquierda : .abajoDerecha)
+                                                      : (columna == .izquierda ? .arribaIzquierda : .arribaDerecha)
+            return quedan.map { $0 == pareja ? .mitad(columna) : $0 }
+        }
+        let otra: Columna = columna == .izquierda ? .derecha : .izquierda
+        guard partida(otra, quedan) else { return quedan }
+        return quedan.map { z in
+            guard z.columna == otra else { return z }
+            return z.deArriba ? .izquierda : .derecha
+        }
+    }
+
     /// "Sumar app" desde la barra: lo libre, si hay; si no, se parte la columna más ancha que tiene una ventana de
     /// mitad (la nueva va al cuarto de abajo y la de antes sube al de arriba, ver `acomodar`). Nil con cuatro.
     static func dondeSumar(ocupadas: [ZonaMosaico], divisiones d: Divisiones) -> ZonaMosaico? {

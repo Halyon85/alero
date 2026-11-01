@@ -133,6 +133,18 @@ final class MosaicoTests: XCTestCase {
         XCTAssertNil(ReglasMosaico.dondeSumar(ocupadas: [.completa], divisiones: Divisiones()))
     }
 
+    func testQuitarUnaApp() {
+        // De cuatro a tres: el cuarto que queda solo en su columna pasa a ser la mitad.
+        XCTAssertEqual(ReglasMosaico.quitar(.abajoDerecha, quedan: [.arribaIzquierda, .abajoIzquierda, .arribaDerecha]),
+                       [.arribaIzquierda, .abajoIzquierda, .derecha])
+        // De tres a dos: mitad izquierda y dos cuartos, sale uno de la derecha.
+        XCTAssertEqual(ReglasMosaico.quitar(.arribaDerecha, quedan: [.izquierda, .abajoDerecha]), [.izquierda, .derecha])
+        // Sale la mitad: los dos cuartos del otro lado pasan a ser las dos mitades.
+        XCTAssertEqual(ReglasMosaico.quitar(.izquierda, quedan: [.arribaDerecha, .abajoDerecha]), [.izquierda, .derecha])
+        // De dos mitades queda una sola: no se toca (el grupo se termina).
+        XCTAssertEqual(ReglasMosaico.quitar(.derecha, quedan: [.izquierda]), [.izquierda])
+    }
+
     func testCambiarDeLado() {
         XCTAssertEqual(ReglasMosaico.intercambiar(.izquierda, .vertical), .derecha)
         XCTAssertEqual(ReglasMosaico.intercambiar(.abajoDerecha, .vertical), .abajoIzquierda)

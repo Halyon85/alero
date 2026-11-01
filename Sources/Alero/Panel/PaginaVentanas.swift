@@ -45,11 +45,12 @@ struct PaginaVentanas: View {
                    "With the screen split in halves, drag the third one to a corner: the one on that side moves to the other quarter."),
                  icono: "rectangle.split.1x2")
             paso(T("La barra del medio", "The middle bar"),
-                 T("Sobre la unión hay una barra: arrastrala para agrandar una y achicar la otra (con cuatro, la perilla del medio va en diagonal); doble clic la centra. Un clic en la barra abre Cambiar, Al medio, Sumar app y Salir.",
-                   "A bar sits on the seam: drag it to grow one and shrink the other (with four, the center knob moves diagonally); double-click centers it. Click the bar for Swap, Center, Add app and Exit."),
+                 T("Sobre la unión hay una barra: arrastrala para agrandar una y achicar la otra (con cuatro, la perilla del medio va en diagonal); doble clic la centra. Un clic en la barra abre Cambiar, Al medio, Sumar app, Quitar app y Salir.",
+                   "A bar sits on the seam: drag it to grow one and shrink the other (with four, the center knob moves diagonally); double-click centers it. Click the bar for Swap, Center, Add app, Remove app and Exit."),
                  icono: "arrow.left.and.right")
             paso(T("Sacar una ventana", "Take a window out"),
-                 T("Arrastrala afuera por su barra de arriba y vuelve a su tamaño de antes.", "Drag it out by its title bar and it goes back to its earlier size."),
+                 T("Arrastrala afuera por su barra de arriba (o usá Quitar app) y vuelve a como estaba; las demás se agrandan para no dejar huecos.",
+                   "Drag it out by its title bar (or use Remove app) and it goes back to how it was; the others grow to fill the gap."),
                  icono: "arrow.uturn.backward")
             paso(T("Con dos monitores", "With two displays"),
                  T("Del lado donde la pantalla sigue en el otro monitor, quedate un momento cerca del borde.",
