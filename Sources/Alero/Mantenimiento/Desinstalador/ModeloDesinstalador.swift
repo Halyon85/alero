@@ -46,8 +46,14 @@ final class ModeloDesinstalador: ObservableObject {
     /// Cuántas apps del lote llegaron a la Papelera ("3 apps a la Papelera").
     @Published private(set) var appsMovidas = 0
     @Published private(set) var error: String?
+    /// Las apps tildadas en la lista del notch (por ruta), antes de buscar sus restos. Siguen tildadas al buscar otra
+    /// cosa y al cerrar el notch.
+    @Published var marcadas: Set<String> = []
+    /// Lo escrito en el buscador del notch.
+    @Published var busqueda = ""
 
     private var cancelacion: Cancelacion?
+    private var leyendoLista = false
 
     deinit { cancelacion?.cancelar() }
 
@@ -78,6 +84,43 @@ final class ModeloDesinstalador: ObservableObject {
             let lista = ModeloDesinstalador.appsInstaladas()
             DispatchQueue.main.async { self?.apps = lista }
         }
+    }
+
+    /// Vuelve a leer la lista aunque ya la tenga: la llama el notch al mostrarse y `volver` después de desinstalar
+    /// (lo que se fue a la Papelera deja de aparecer y se destilda).
+    func recargarLista() {
+        guard !leyendoLista else { return }
+        leyendoLista = true
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let lista = ModeloDesinstalador.appsInstaladas()
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.leyendoLista = false
+                self.apps = lista
+                self.marcadas.formIntersection(lista.map(\.id))
+            }
+        }
+    }
+
+    /// Las apps cuyo nombre tiene lo buscado, sin importar mayúsculas ni tildes ("disenador" encuentra "Diseñador").
+    /// Primero las que empiezan así, después las que lo tienen en el medio; cada grupo en el orden de la lista.
+    static func filtrar(_ apps: [AppDeLista], _ texto: String) -> [AppDeLista] {
+        let buscado = texto.trimmingCharacters(in: .whitespaces)
+        guard !buscado.isEmpty else { return apps }
+        let opciones: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
+        let coinciden = apps.filter { $0.nombre.range(of: buscado, options: opciones) != nil }
+        let empiezan = coinciden.filter { $0.nombre.range(of: buscado, options: opciones.union(.anchored)) != nil }
+        return empiezan + coinciden.filter { !empiezan.contains($0) }
+    }
+
+    /// Tildar o destildar una app de la lista del notch.
+    func alternarMarcada(_ app: AppDeLista) {
+        if marcadas.contains(app.id) { marcadas.remove(app.id) } else { marcadas.insert(app.id) }
+    }
+
+    /// "Buscar restos" del notch: elige las tildadas, en el orden de la lista.
+    func elegirMarcadas() {
+        elegir(apps.filter { marcadas.contains($0.id) }.map(\.url))
     }
 
     private static func appsInstaladas() -> [AppDeLista] {
@@ -170,6 +213,8 @@ final class ModeloDesinstalador: ObservableObject {
     /// Vuelve a elegir. No hace nada mientras se cierran o se mueven apps (ese trabajo termina igual).
     func volver() {
         guard estado != .cerrando, estado != .desinstalando else { return }
+        // Después de desinstalar se arranca de cero; con "Cancelar" lo tildado sigue tildado.
+        let desinstalo = estado == .terminado
         cancelacion?.cancelar()
         lote = []
         elegidos = []
@@ -179,6 +224,11 @@ final class ModeloDesinstalador: ObservableObject {
         appsMovidas = 0
         error = nil
         estado = .eligiendo
+        if desinstalo {
+            marcadas = []
+            busqueda = ""
+            recargarLista()
+        }
     }
 
     func alternar(_ resto: RestoApp) {
@@ -409,6 +459,14 @@ final class ModeloDesinstalador: ObservableObject {
             AppDeLista(url: URL(fileURLWithPath: "/Applications/\($0).app"), nombre: $0)
         }
         modelo.rechazos = [Rechazada(nombre: "Safari.app", motivo: RechazoApp.deApple.explicacion)]
+        return modelo
+    }
+
+    /// La lista del notch buscando, con dos apps tildadas.
+    static func muestraListaMarcada() -> ModeloDesinstalador {
+        let modelo = muestraLista()
+        modelo.rechazos = []
+        modelo.marcadas = ["/Applications/Diseñador.app", "/Applications/Radio Viva.app"]
         return modelo
     }
 

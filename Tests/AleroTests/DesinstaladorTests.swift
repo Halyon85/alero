@@ -39,6 +39,20 @@ final class DesinstaladorTests: XCTestCase {
         XCTAssertEqual(elegida.identificadores, ["com.foo.Notas", "com.foo.Notas.Compartir"])
     }
 
+    func testFiltrarListaDeApps() {
+        let apps = ["Arc", "Diseñador", "Google Chrome", "Zoom", "Chromium"].map {
+            ModeloDesinstalador.AppDeLista(url: URL(fileURLWithPath: "/Applications/\($0).app"), nombre: $0)
+        }
+        func nombres(_ texto: String) -> [String] { ModeloDesinstalador.filtrar(apps, texto).map(\.nombre) }
+        XCTAssertEqual(nombres(""), ["Arc", "Diseñador", "Google Chrome", "Zoom", "Chromium"])
+        XCTAssertEqual(nombres("  "), nombres(""))
+        // Sin importar mayúsculas ni tildes.
+        XCTAssertEqual(nombres("DISENADOR"), ["Diseñador"])
+        // Primero las que empiezan con lo buscado.
+        XCTAssertEqual(nombres("chrom"), ["Chromium", "Google Chrome"])
+        XCTAssertEqual(nombres("xyz"), [])
+    }
+
     func testRechazos() throws {
         func motivo(_ url: URL) -> RechazoApp? {
             if case .failure(let m) = ReglasApp.validar(url, propio: "team.halyon.alero", rutaPropia: c.ruta("Applications/Alero.app")) { return m }

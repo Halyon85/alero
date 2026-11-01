@@ -74,7 +74,7 @@ struct PaginaDesinstalador: View {
     }
 
     private var lista: some View {
-        let filtradas = modelo.apps.filter { busqueda.isEmpty || $0.nombre.localizedCaseInsensitiveContains(busqueda) }
+        let filtradas = ModeloDesinstalador.filtrar(modelo.apps, busqueda)
         return Tarjeta(titulo: T("Aplicaciones", "Applications")) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").font(.system(size: 12)).foregroundStyle(Tema.apagado)

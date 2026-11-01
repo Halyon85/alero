@@ -23,7 +23,7 @@ enum MuestrasMantenimiento {
         }
         // El desinstalador del notch (Utilidades, columna derecha), con varias apps elegidas.
         let notch: [(String, ModeloDesinstalador)] = [
-            ("vacio", ModeloDesinstalador.muestraLista()), ("una", .muestra()), ("varias", .muestraVarias()),
+            ("vacio", ModeloDesinstalador.muestraLista()), ("marcadas", .muestraListaMarcada()), ("una", .muestra()), ("varias", .muestraVarias()),
             ("varias-abiertas", .muestraVariasAbiertas()), ("varias-terminado", .muestraVariasTerminado()),
         ]
         for (nombre, modelo) in notch {

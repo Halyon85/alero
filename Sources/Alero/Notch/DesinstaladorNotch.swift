@@ -1,15 +1,16 @@
 import AppKit
 import SwiftUI
 
-// Desinstalar apps desde el notch (Utilidades, columna derecha, unos 380×140 pt). "Elegir apps…" abre directo el
-// cuadro de abrir de macOS en Aplicaciones con selección múltiple; también se pueden soltar una o varias apps
-// arrastrando. Muestra un resumen compacto (cuántas, cuánto ocupan en total y una fila por app) y las manda todas
-// juntas a la Papelera. Usa `ModelosNotch.desinstalador`, que vive mientras Alero está abierta. Para revisar archivo
-// por archivo está "Detalle" (la página de Alero).
+// Desinstalar apps desde el notch (Utilidades, columna derecha, unos 320×140 pt), sin salir de él: un buscador con
+// las apps instaladas, se tildan una o varias (siguen tildadas al buscar otra) y "Buscar restos" busca lo que dejó
+// cada una. También se pueden soltar apps arrastrando. Muestra un resumen compacto (cuántas, cuánto ocupan en total y
+// una fila por app) y las manda todas juntas a la Papelera. Usa `ModelosNotch.desinstalador`, que vive mientras Alero
+// está abierta (cerrar el notch no pierde lo tildado). Para revisar archivo por archivo está "Detalle" (la página).
 
 struct DesinstaladorNotch: View {
     @ObservedObject private var modelo: ModeloDesinstalador
     @State private var sobre = false
+    @FocusState private var enfocado: Bool
     @Environment(\.enCapturas) private var enCapturas
 
     /// `modelo` se cambia solo en las capturas (`MuestrasMantenimiento`).
@@ -28,7 +29,7 @@ struct DesinstaladorNotch: View {
                 }
             }
             switch modelo.estado {
-            case .eligiendo: cuadro
+            case .eligiendo: lista
             case .buscando: buscando
             case .terminado: terminado
             case .listo, .cerrando, .desinstalando: resumen
@@ -37,7 +38,7 @@ struct DesinstaladorNotch: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .modifier(SoltarApps(activo: !enCapturas, sobre: $sobre) { modelo.trabajando ? nil : modelo.elegir })
         .overlay {
-            if sobre, modelo.estado != .eligiendo {
+            if sobre {
                 RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Tema.acento, lineWidth: 1.2)
             }
         }
@@ -46,26 +47,87 @@ struct DesinstaladorNotch: View {
 
     // MARK: - Elegir
 
-    private var cuadro: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 7) {
-                Image(systemName: "arrow.down.app").font(.system(size: 17, weight: .light))
-                    .foregroundStyle(sobre ? Tema.acento : Tema.textoNotchSuave)
-                Text(T("Soltá una o varias apps", "Drop one or more apps")).font(.system(size: 12, weight: .semibold))
+    /// El buscador arriba (con "Buscar restos" a la derecha cuando hay apps tildadas) y la lista filtrada abajo.
+    private var lista: some View {
+        let filtradas = ModeloDesinstalador.filtrar(modelo.apps, modelo.busqueda)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                buscador(filtradas)
+                if !modelo.marcadas.isEmpty {
+                    Button(T("Buscar restos (\(modelo.marcadas.count))", "Find leftovers (\(modelo.marcadas.count))")) {
+                        enfocado = false
+                        modelo.elegirMarcadas()
+                    }
+                    .buttonStyle(BotonPastilla(relleno: true))
+                    .fixedSize()
+                }
             }
-            Button { elegirConPanel() } label: {
-                Label(T("Elegir apps…", "Choose apps…"), systemImage: "plus")
-            }
-            .buttonStyle(BotonPastilla(relleno: true))
             if let rechazo = textoRechazos {
                 Text(rechazo).font(.system(size: 10)).foregroundStyle(Self.rojo).lineLimit(1).truncationMode(.tail)
             }
+            if modelo.apps.isEmpty {
+                aviso(T("Leyendo tus apps…", "Reading your apps…"))
+            } else if filtradas.isEmpty {
+                aviso(T("Ninguna app con «\(modelo.busqueda)»", "No app matches “\(modelo.busqueda)”"))
+            } else {
+                DesplazableNotch {
+                    LazyVStack(alignment: .leading, spacing: 1) { ForEach(filtradas) { filaLista($0) } }
+                }
+                .frame(maxHeight: .infinity)
+            }
         }
-        .padding(.horizontal, 10)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(sobre ? 0.08 : 0.04)))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .strokeBorder(sobre ? Tema.acento : Color.white.opacity(0.15), style: StrokeStyle(lineWidth: 1.2, dash: [5, 4])))
+        // Las apps instaladas se leen de nuevo cada vez que se ve (las capturas usan su lista de muestra).
+        .onAppear { if !enCapturas { modelo.recargarLista() } }
+    }
+
+    /// Un clic acá y el notch toma el teclado (ver `InstanciaNotch.seEscribe`). Enter tilda la única que quedó;
+    /// Esc borra lo escrito y, si ya estaba vacío, suelta el teclado.
+    private func buscador(_ filtradas: [ModeloDesinstalador.AppDeLista]) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "magnifyingglass").font(.system(size: 10, weight: .semibold)).foregroundStyle(Tema.textoNotchSuave)
+            TextField("", text: $modelo.busqueda,
+                      prompt: Text(T("Buscar una app o soltarla acá", "Search for an app or drop it here")).foregroundColor(Tema.textoNotchSuave))
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .focused($enfocado)
+                .onSubmit { if filtradas.count == 1 { modelo.alternarMarcada(filtradas[0]) } }
+                .onExitCommand { if modelo.busqueda.isEmpty { enfocado = false } else { modelo.busqueda = "" } }
+            if !modelo.busqueda.isEmpty {
+                Button { modelo.busqueda = "" } label: {
+                    Image(systemName: "xmark.circle.fill").font(.system(size: 11)).foregroundStyle(Tema.textoNotchSuave)
+                }
+                .buttonStyle(.plain)
+                .help(T("Borrar", "Clear"))
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 26)
+        .background(Color.white.opacity(enfocado ? 0.10 : 0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .contentShape(Rectangle())
+        .onTapGesture { enfocado = true }
+    }
+
+    private func filaLista(_ app: ModeloDesinstalador.AppDeLista) -> some View {
+        let marcada = modelo.marcadas.contains(app.id)
+        return Button { modelo.alternarMarcada(app) } label: {
+            HStack(spacing: 7) {
+                Image(systemName: marcada ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 12)).foregroundStyle(marcada ? Tema.acento : Tema.textoNotchSuave)
+                Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path)).resizable().frame(width: 16, height: 16)
+                Text(app.nombre).font(.system(size: 11.5)).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 6)
+            .frame(height: 21)
+            .background(marcada ? Color.white.opacity(0.07) : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func aviso(_ texto: String) -> some View {
+        Text(texto).font(.system(size: 11)).foregroundStyle(Tema.textoNotchSuave).lineLimit(1).truncationMode(.middle)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var buscando: some View {
@@ -219,11 +281,6 @@ struct DesinstaladorNotch: View {
         if modelo.rechazos.count == 1 { return "\(primero.nombre): \(primero.motivo)" }
         let nombres = modelo.rechazos.map(\.nombre).joined(separator: ", ")
         return T("\(modelo.rechazos.count) no se pueden: \(nombres)", "\(modelo.rechazos.count) can't be removed: \(nombres)")
-    }
-
-    private func elegirConPanel() {
-        let urls = ElegirApps.conPanel()
-        if !urls.isEmpty { modelo.elegir(urls) }
     }
 
     private static let rojo = Color(nsColor: NSColor(hex: 0xFF8A80))

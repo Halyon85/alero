@@ -287,7 +287,7 @@ final class InstanciaNotch {
         ubicar(en: pantalla)
         panel.orderFrontRegardless()
         teclado = estado.$modo.combineLatest(estado.$espacio).sink { [weak self] modo, espacio in
-            self?.permitirTeclado(modo == .abierto && (espacio == .terminal || espacio == .teleprompter))
+            self?.permitirTeclado(modo == .abierto && InstanciaNotch.seEscribe(en: espacio))
         }
         observacion = estado.$modo.removeDuplicates().dropFirst().sink { [weak self] modo in
             guard let self else { return }
@@ -309,10 +309,15 @@ final class InstanciaNotch {
         }
     }
 
-    /// Escribiendo en la terminal o en el guion, sacar el mouse no cierra el notch (se cierra con un clic afuera).
+    /// Escribiendo en la terminal, en el guion o en el buscador del desinstalador, sacar el mouse no cierra el notch
+    /// (se cierra con un clic afuera).
     var escribiendo: Bool {
-        panel.isKeyWindow && estado.modo == .abierto && (estado.espacio == .terminal || estado.espacio == .teleprompter)
+        panel.isKeyWindow && estado.modo == .abierto && InstanciaNotch.seEscribe(en: estado.espacio)
     }
+
+    /// Las pestañas con algo para escribir: la terminal, el guion del teleprompter y el buscador de apps de Utilidades.
+    /// Solo ahí el notch puede tomar el teclado, y solo cuando hacés clic en el campo.
+    static func seEscribe(en espacio: EspacioNotch) -> Bool { [.terminal, .teleprompter, .utilidades].contains(espacio) }
 
     func ubicar(en nueva: NSScreen) {
         pantalla = nueva.numero
@@ -466,7 +471,7 @@ final class PanelNotch: NSPanel {
         animationBehavior = .none
     }
 
-    /// Solo con la terminal o el guion del teleprompter a la vista: ahí se escribe. El resto del tiempo el notch nunca le saca el teclado a nadie.
+    /// Solo con la terminal, el guion del teleprompter o el buscador de apps a la vista: ahí se escribe. El resto del tiempo el notch nunca le saca el teclado a nadie.
     var aceptaTeclado = false
     override var canBecomeKey: Bool { aceptaTeclado }
     override var canBecomeMain: Bool { false }
