@@ -45,8 +45,8 @@ struct PaginaVentanas: View {
                    "With the screen split in halves, drag the third one to a corner: the one on that side moves to the other quarter."),
                  icono: "rectangle.split.1x2")
             paso(T("La barra del medio", "The middle bar"),
-                 T("Entre las ventanas queda una barra: arrastrala para agrandar una y achicar la otra; doble clic la centra. Si estirás una ventana desde su borde, las demás la siguen.",
-                   "A bar sits between the windows: drag it to grow one and shrink the other; double-click centers it. If you stretch a window from its edge, the others follow."),
+                 T("Sobre la unión hay una barra: arrastrala para agrandar una y achicar la otra (con cuatro, la perilla del medio va en diagonal); doble clic la centra. Un clic en la barra abre Cambiar, Al medio, Sumar app y Salir.",
+                   "A bar sits on the seam: drag it to grow one and shrink the other (with four, the center knob moves diagonally); double-click centers it. Click the bar for Swap, Center, Add app and Exit."),
                  icono: "arrow.left.and.right")
             paso(T("Sacar una ventana", "Take a window out"),
                  T("Arrastrala afuera por su barra de arriba y vuelve a su tamaño de antes.", "Drag it out by its title bar and it goes back to its earlier size."),

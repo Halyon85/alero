@@ -9,10 +9,12 @@ import Combine
 //   ventana) y un buscador que también encuentra las instaladas que no están abiertas. Cancelarlo con la X o Esc
 //   devuelve la primera ventana a como estaba;
 // - una ventana nueva en un cuarto de una columna ocupada por una mitad parte la columna (entra una tercera app);
-// - las ventanas quedan pegadas y sobre la unión hay una barra siempre a la vista: arrastrándola, todas se
-//   reacomodan mientras la movés; doble clic la centra. Con cuatro, en el cruce hay una perilla que va en diagonal.
-//   Pasando el mouse por la pastilla aparecen "Cambiar" (de lado), "Al medio" y "Salir" (todas vuelven a como
-//   estaban). Si estirás una ventana desde su borde o su esquina, las demás la siguen en vivo;
+// - las ventanas quedan pegadas y sobre la unión hay una barra siempre a la vista. Mientras la arrastrás, cada
+//   ventana queda tapada por una cortina (vidrio con el ícono de su app) que va a su lugar nuevo al instante, y las
+//   ventanas de verdad se mueven una sola vez al soltar (como el iPad): mover las apps en vivo deja huecos y va a
+//   los saltos, porque cada una tarda distinto en redibujarse. Doble clic la centra. Con cuatro, en el cruce hay una
+//   perilla que va en diagonal. Un clic en la pastilla abre "Cambiar" (de lado), "Al medio", "Sumar app" y "Salir"
+//   (todas vuelven a como estaban). Si estirás una ventana desde su borde o su esquina, las demás se tapan y la siguen;
 // - sacar una ventana del grupo (arrastrándola) la devuelve a su tamaño de antes, y si de un grupo queda una sola
 //   (cerraste o minimizaste la otra), esa también vuelve a como estaba.
 // El mouse se mira con escuchas globales de AppKit, que solo leen: nunca frenan ni cambian un clic. Lo de
@@ -66,8 +68,8 @@ final class Mosaico {
     private let paneles = PanelesMosaico()
     // Mientras se arrastra una barra, se manda a mover una tanda por vez; si llegan más, queda la última.
     private var aplicando = false
-    private var pendiente: (pantalla: PantallaCG, corregir: Bool, vivo: Bool, excepto: CGWindowID?)?
-    /// Una ventana del grupo que la persona está estirando desde su borde (las demás la siguen en vivo).
+    private var pendiente: (pantalla: PantallaCG, corregir: Bool, excepto: CGWindowID?, quitarCortinas: Bool)?
+    /// Una ventana del grupo que la persona está estirando desde su borde (las demás se tapan y la siguen).
     private var estirada: (id: CGWindowID, pantalla: PantallaCG)?
 
     /// La llama `Delegado` al arrancar, una vez.
@@ -117,6 +119,7 @@ final class Mosaico {
     /// puede ser el comienzo de un arrastre (se confirma en `seguir`, cuando la ventana se corre sin cambiar de tamaño).
     private func empezar(en p: CGPoint) {
         paneles.cerrarAsistente()
+        paneles.ocultarMenu()
         arrastre = nil
         guard let v = VentanasVisibles.bajo(p), p.y - v.marco.minY <= 60 else { return }
         arrastre = Arrastre(id: v.id, pid: v.pid, inicial: v.marco, actual: v.marco)
@@ -260,7 +263,7 @@ final class Mosaico {
     }
 
     private func revisar() {
-        guard arrastre == nil, !paneles.arrastrandoBarra, !aplicando else { return }
+        guard arrastre == nil, estirada == nil, !paneles.arrastrandoBarra, !aplicando else { return }
         let visibles = VentanasVisibles.todas()
         var marcos: [CGWindowID: CGRect] = [:]
         for v in visibles { marcos[v.id] = v.marco }
@@ -338,6 +341,7 @@ final class Mosaico {
                     mover: { [weak self] p, final in self?.moverBarra(tipo, en: pantalla, hasta: p, final: final) },
                     centrar: { [weak self] in self?.centrarBarra(tipo, en: pantalla) },
                     cambiar: tipo == .cruce ? nil : { [weak self] in self?.cambiarDeLado(tipo, en: pantalla) },
+                    sumar: grupo.miembros.count < 4 ? { [weak self] in self?.sumarApp(pantalla) } : nil,
                     salir: { [weak self] in self?.salir(pantalla) }))
             }
         }
@@ -350,6 +354,17 @@ final class Mosaico {
     /// `deshacer`: la ventana que se acaba de acomodar sola (cancelar con la X o Esc la devuelve a como estaba).
     private func ofrecerLibre(_ grupo: Grupo, deshacer: Miembro?) {
         guard let libre = ReglasMosaico.libre(ocupadas: grupo.ocupadas) else { paneles.cerrarAsistente(); return }
+        ofrecer(en: libre, grupo: grupo, deshacer: deshacer)
+    }
+
+    /// "Sumar app" de la barra: ofrece una app más en lo libre o partiendo la columna más ancha.
+    private func sumarApp(_ pantalla: PantallaCG) {
+        guard let grupo = grupos.first(where: { $0.pantalla == pantalla }),
+              let zona = ReglasMosaico.dondeSumar(ocupadas: grupo.ocupadas, divisiones: grupo.divisiones) else { return }
+        ofrecer(en: zona, grupo: grupo, deshacer: nil)
+    }
+
+    private func ofrecer(en libre: ZonaMosaico, grupo: Grupo, deshacer: Miembro?) {
         let acomodadas = Set(grupos.flatMap { $0.miembros.map(\.id) })
         let apps = AppsAbiertas.ahora()
         let pantalla = grupo.pantalla
@@ -435,20 +450,31 @@ final class Mosaico {
 
     // MARK: - Barras
 
-    /// Se arrastra una barra: se corre la división, la barra va a la división nueva y todas las ventanas del grupo se
-    /// reacomodan en vivo. Al soltar, una pasada más que corrige si alguna app no se dejó achicar.
+    /// Se arrastra una barra: se corre la división, la barra y las cortinas van al lugar nuevo al instante, y al
+    /// soltar las ventanas de verdad se mueven una sola vez (con una pasada que corrige si alguna app no se dejó
+    /// achicar); las cortinas se van cuando ya están en su lugar.
     private func moverBarra(_ tipo: TipoBarra, en pantalla: PantallaCG, hasta p: CGPoint, final: Bool) {
         guard let i = grupos.firstIndex(where: { $0.pantalla == pantalla }) else { return }
         grupos[i].divisiones = ReglasMosaico.mover(grupos[i].divisiones, tipo, hasta: p, en: pantalla.visible)
         reubicarBarras(pantalla)
-        aplicar(pantalla, corregir: true, vivo: !final)
+        cubrir(grupos[i])
+        if final { aplicar(pantalla, quitarCortinas: true) }
+    }
+
+    /// Tapa cada ventana del grupo (menos `excepto`) con su cortina, en el lugar que le toca con las divisiones de ahora.
+    private func cubrir(_ grupo: Grupo, excepto: CGWindowID? = nil) {
+        paneles.mostrarCortinas(grupo.miembros.filter { $0.id != excepto }.map { m in
+            PanelesMosaico.Cortina(id: m.id, pid: m.pid,
+                                   marco: ReglasMosaico.marco(m.zona, en: grupo.pantalla.visible, divisiones: grupo.divisiones))
+        })
     }
 
     private func centrarBarra(_ tipo: TipoBarra, en pantalla: PantallaCG) {
         guard let i = grupos.firstIndex(where: { $0.pantalla == pantalla }) else { return }
         grupos[i].divisiones = ReglasMosaico.centrar(grupos[i].divisiones, tipo)
         reubicarBarras(pantalla)
-        aplicar(pantalla)
+        cubrir(grupos[i])
+        aplicar(pantalla, quitarCortinas: true)
     }
 
     /// "Cambiar": las ventanas de un lado de la barra pasan al otro (y viceversa).
@@ -457,7 +483,8 @@ final class Mosaico {
         for j in grupos[i].miembros.indices {
             grupos[i].miembros[j].zona = ReglasMosaico.intercambiar(grupos[i].miembros[j].zona, tipo)
         }
-        aplicar(pantalla)
+        cubrir(grupos[i])
+        aplicar(pantalla, quitarCortinas: true)
     }
 
     /// "Salir": se termina el acomodo de esa pantalla y cada ventana vuelve a como estaba antes.
@@ -477,11 +504,11 @@ final class Mosaico {
     // MARK: - Estirar una ventana desde su borde
 
     /// Mientras la persona estira una ventana del grupo desde su borde o su esquina (un arrastre que no empezó en
-    /// la barra de arriba), las demás la siguen en vivo. Como mucho cada 30 ms.
+    /// la barra de arriba), las demás se tapan con su cortina y la siguen al instante; al soltar se mueven de verdad.
     private func seguirEstirando() {
         guard !grupos.isEmpty, !aplicando else { return }
         let ahora = CACurrentMediaTime()
-        guard ahora - ultimaMirada > 0.03 else { return }
+        guard ahora - ultimaMirada > 0.016 else { return }
         ultimaMirada = ahora
         var marcos: [CGWindowID: CGRect] = [:]
         for v in VentanasVisibles.todas() { marcos[v.id] = v.marco }
@@ -489,35 +516,39 @@ final class Mosaico {
             let g = grupos[i]
             for (j, m) in g.miembros.enumerated() {
                 if let estirada, estirada.id != m.id { continue }
-                guard let marco = marcos[m.id], !Geometria.parecidos(marco, m.quedo, tolerancia: 3),
+                guard let marco = marcos[m.id], !Geometria.parecidos(marco, m.quedo, tolerancia: 2),
                       let nuevas = ReglasMosaico.divisiones(siCambio: m.zona, a: marco, ocupadas: g.ocupadas,
                                                             en: g.pantalla.visible, divisiones: g.divisiones) else { continue }
                 estirada = (m.id, g.pantalla)
                 grupos[i].divisiones = nuevas
                 grupos[i].miembros[j].quedo = marco
                 reubicarBarras(g.pantalla)
-                aplicar(g.pantalla, corregir: false, vivo: true, excepto: m.id)
+                cubrir(grupos[i], excepto: m.id)
                 return
             }
         }
     }
 
-    /// Al soltar la ventana estirada: una pasada final para que todas queden justas en sus lugares.
+    /// Al soltar la ventana estirada: las demás se mueven de verdad y se van las cortinas.
     private func soltarEstirada() {
         guard let estirada else { return }
         self.estirada = nil
-        aplicar(estirada.pantalla)
+        aplicar(estirada.pantalla, quitarCortinas: true)
     }
 
-    /// Pone cada ventana del grupo en su zona (menos `excepto`, la que la persona está estirando).
-    /// - Primero las que se achican y después las que se agrandan, así no se pisan; cada tanda en paralelo, una app
-    ///   por hilo (si fueran de a una, la última recién se movería al soltar).
-    /// - `vivo`: mientras se arrastra, sin el truco de la "interfaz mejorada" (es lento y frenaría todo).
-    /// - `corregir`: si una app no se dejó achicar tanto, la barra se corre hasta donde quedó y las demás se
-    ///   acomodan a eso (una sola vez), así nunca se pisan.
-    private func aplicar(_ pantalla: PantallaCG, corregir: Bool = true, vivo: Bool = false, excepto: CGWindowID? = nil) {
-        if aplicando { pendiente = (pantalla, corregir, vivo, excepto); return }
-        guard let grupo = grupos.first(where: { $0.pantalla == pantalla }) else { return }
+    /// Pone cada ventana del grupo en su zona (menos `excepto`). Primero las que se achican y después las que se
+    /// agrandan, así no se pisan; cada tanda en paralelo, una app por hilo. `corregir`: si una app no se dejó
+    /// achicar tanto, la barra se corre hasta donde quedó y las demás se acomodan a eso (una sola vez).
+    /// `quitarCortinas`: al terminar todo, se van las cortinas (ya están las ventanas en su lugar).
+    private func aplicar(_ pantalla: PantallaCG, corregir: Bool = true, excepto: CGWindowID? = nil, quitarCortinas: Bool = false) {
+        if aplicando {
+            pendiente = (pantalla, corregir, excepto, quitarCortinas || pendiente?.quitarCortinas == true)
+            return
+        }
+        guard let grupo = grupos.first(where: { $0.pantalla == pantalla }) else {
+            if quitarCortinas { paneles.quitarCortinas() }
+            return
+        }
         aplicando = true
         let tanda = grupo.miembros.filter { $0.id != excepto }.map { m -> (Miembro, CGRect, Bool) in
             let destino = ReglasMosaico.marco(m.zona, en: pantalla.visible, divisiones: grupo.divisiones)
@@ -530,7 +561,7 @@ final class Mosaico {
                 let parte = tanda.filter { $0.2 == achican }
                 DispatchQueue.concurrentPerform(iterations: parte.count) { k in
                     let (m, destino, _) = parte[k]
-                    if vivo { AX.ponerMarco(m.ventana, destino) } else { Mosaico.ponerMarco(m.ventana, pid: m.pid, destino) }
+                    Mosaico.ponerMarco(m.ventana, pid: m.pid, destino)
                     let quedo = AX.marco(m.ventana)
                     candado.lock()
                     quedaron[m.id] = quedo
@@ -540,7 +571,10 @@ final class Mosaico {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.aplicando = false
-                guard let i = self.grupos.firstIndex(where: { $0.pantalla == pantalla }) else { return }
+                guard let i = self.grupos.firstIndex(where: { $0.pantalla == pantalla }) else {
+                    if quitarCortinas { self.paneles.quitarCortinas() }
+                    return
+                }
                 var ajustadas: Divisiones?
                 for (m, destino, _) in tanda {
                     guard let quedo = quedaron[m.id], let j = self.grupos[i].miembros.firstIndex(where: { $0.id == m.id }) else { continue }
@@ -552,12 +586,15 @@ final class Mosaico {
                 }
                 if let otro = self.pendiente {
                     self.pendiente = nil
-                    self.aplicar(otro.pantalla, corregir: otro.corregir, vivo: otro.vivo, excepto: otro.excepto)
+                    self.aplicar(otro.pantalla, corregir: otro.corregir, excepto: otro.excepto,
+                                 quitarCortinas: otro.quitarCortinas || quitarCortinas)
                 } else if let ajustadas {
                     self.grupos[i].divisiones = ajustadas
                     self.reubicarBarras(pantalla)
-                    self.aplicar(pantalla, corregir: false, vivo: vivo, excepto: excepto)
-                } else if !vivo {
+                    if quitarCortinas { self.cubrir(self.grupos[i], excepto: excepto) }
+                    self.aplicar(pantalla, corregir: false, excepto: excepto, quitarCortinas: quitarCortinas)
+                } else {
+                    if quitarCortinas { self.paneles.quitarCortinas() }
                     self.mostrarBarras(visibles: VentanasVisibles.todas())
                 }
             }

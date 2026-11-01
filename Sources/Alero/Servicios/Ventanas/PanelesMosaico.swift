@@ -7,8 +7,10 @@ import SwiftUI
 //   (Esc o la X cancelan; un clic afuera solo la cierra);
 // - las barras: sobre la unión entre ventanas, una línea fina con una pastilla (o la perilla del cruce, con cuatro)
 //   que se arrastra; doble clic las centra. La franja que se agarra es más ancha que la línea y tapa los bordes con
-//   que macOS agranda las ventanas, así el clic lo toma la barra. Pasando el mouse por la pastilla aparece un menú
-//   chico: "Cambiar", "Al medio" y "Salir".
+//   que macOS agranda las ventanas, así el clic lo toma la barra. Un clic en la pastilla abre un menú chico:
+//   "Cambiar", "Al medio", "Sumar app" y "Salir";
+// - las cortinas: mientras se arrastra una barra, un vidrio con el ícono de la app tapa cada ventana y va a su lugar
+//   nuevo al instante (las ventanas de verdad se mueven al soltar). Van entre las ventanas comunes y las barras.
 // Los rectángulos llegan en coordenadas de eventos (origen arriba) y se pasan a las de AppKit (origen abajo).
 
 final class PanelesMosaico {
@@ -22,12 +24,23 @@ final class PanelesMosaico {
         let centrar: () -> Void
         /// Nil en el cruce (no hay lados que cambiar).
         let cambiar: (() -> Void)?
+        /// Nil con cuatro ventanas (no entra otra).
+        let sumar: (() -> Void)?
         let salir: () -> Void
+    }
+
+    /// Una ventana tapada mientras se arrastra: dónde tiene que estar ya.
+    struct Cortina {
+        let id: CGWindowID
+        let pid: pid_t
+        let marco: CGRect
     }
 
     private var vistaPrevia: NSPanel?
     private var asistente: PanelAsistente?
     private var barras: [String: PanelBarra] = [:]
+    private var cortinas: [CGWindowID: PanelCortina] = [:]
+    private var quitando: DispatchWorkItem?
     private let menu = MenuBarra()
 
     /// Mientras se arrastra alguna barra (`Mosaico` no revisa los grupos en ese rato).
@@ -42,6 +55,50 @@ final class PanelesMosaico {
         ocultarVistaPrevia()
         cerrarAsistente()
         mostrarBarras([])
+        quitarCortinas()
+    }
+
+    func ocultarMenu() { menu.ocultar() }
+
+    // MARK: - Cortinas
+
+    /// Deja tapadas exactamente estas ventanas, cada cortina en su lugar nuevo (sin animación: tiene que seguir a la
+    /// mano). Las barras quedan encima.
+    func mostrarCortinas(_ pedidas: [Cortina]) {
+        quitando?.cancel()
+        quitando = nil
+        let ids = Set(pedidas.map(\.id))
+        for (id, panel) in cortinas where !ids.contains(id) {
+            panel.orderOut(nil)
+            cortinas[id] = nil
+        }
+        var nuevas = false
+        for pedida in pedidas {
+            let panel = cortinas[pedida.id] ?? PanelCortina(pid: pedida.pid)
+            if cortinas[pedida.id] == nil { nuevas = true }
+            cortinas[pedida.id] = panel
+            panel.alphaValue = 1
+            panel.setFrame(PanelesMosaico.aAppKit(pedida.marco), display: true)
+            if !panel.isVisible { panel.orderFrontRegardless() }
+        }
+        if nuevas { barras.values.forEach { $0.orderFrontRegardless() } }
+    }
+
+    /// Las cortinas se van un instante después (para que las apps terminen de redibujarse) y con un fundido corto.
+    func quitarCortinas() {
+        guard !cortinas.isEmpty else { return }
+        quitando?.cancel()
+        let quitar = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let paneles = Array(self.cortinas.values)
+            self.cortinas = [:]
+            NSAnimationContext.runAnimationGroup({ contexto in
+                contexto.duration = 0.15
+                paneles.forEach { $0.animator().alphaValue = 0 }
+            }, completionHandler: { paneles.forEach { $0.orderOut(nil) } })
+        }
+        quitando = quitar
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: quitar)
     }
 
     // MARK: - Vista previa
@@ -162,14 +219,13 @@ final class PanelesMosaico {
                 self?.menu.ocultar()
                 pedido.mover(p, final)
             }
-            vista.centrar = pedido.centrar
-            vista.alPasar = { [weak self, weak panel] centro in
+            vista.centrar = { [weak self] in
+                self?.menu.ocultar()
+                pedido.centrar()
+            }
+            vista.alTocar = { [weak self, weak panel] centro in
                 guard let self, let panel else { return }
-                if let centro {
-                    self.menu.mostrar(pedido, cerca: panel.convertToScreen(CGRect(origin: centro, size: .zero)).origin)
-                } else {
-                    self.menu.ocultarPronto()
-                }
+                self.menu.alternar(pedido, cerca: panel.convertToScreen(CGRect(origin: centro, size: .zero)).origin)
             }
             panel.setFrame(PanelesMosaico.aAppKit(pedido.barra.franja), display: true)
             if !panel.isVisible { panel.orderFrontRegardless() }
@@ -223,16 +279,60 @@ private final class PanelBarra: NSPanel {
     }
 }
 
-/// La línea con sus pastillas (o la perilla del cruce). Cambia el cursor, avisa arrastres, doble clic y cuándo el
-/// mouse está sobre una pastilla (para el menú).
+/// Una cortina: vidrio oscuro con el ícono y el nombre de la app, centrados. No recibe clics.
+private final class PanelCortina: NSPanel {
+    init(pid: pid_t) {
+        super.init(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = false
+        // Arriba de las ventanas comunes y debajo de las barras (que son flotantes).
+        level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue - 1)
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+        hidesOnDeactivate = false
+        isReleasedWhenClosed = false
+        animationBehavior = .none
+        ignoresMouseEvents = true
+        let vidrio = NSVisualEffectView()
+        vidrio.material = .hudWindow
+        vidrio.blendingMode = .behindWindow
+        vidrio.state = .active
+        vidrio.appearance = NSAppearance(named: .darkAqua)
+        vidrio.wantsLayer = true
+        vidrio.layer?.cornerRadius = 10
+        vidrio.layer?.masksToBounds = true
+        vidrio.layer?.borderWidth = 1
+        vidrio.layer?.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
+        let app = NSRunningApplication(processIdentifier: pid)
+        let icono = NSImageView(image: app?.icon ?? NSWorkspace.shared.icon(for: .application))
+        icono.imageScaling = .scaleProportionallyUpOrDown
+        let nombre = NSTextField(labelWithString: app?.localizedName ?? "")
+        nombre.font = .systemFont(ofSize: 14, weight: .semibold)
+        nombre.textColor = .white.withAlphaComponent(0.9)
+        let pila = NSStackView(views: [icono, nombre])
+        pila.orientation = .vertical
+        pila.spacing = 10
+        pila.translatesAutoresizingMaskIntoConstraints = false
+        vidrio.addSubview(pila)
+        NSLayoutConstraint.activate([
+            icono.widthAnchor.constraint(equalToConstant: 72), icono.heightAnchor.constraint(equalToConstant: 72),
+            pila.centerXAnchor.constraint(equalTo: vidrio.centerXAnchor), pila.centerYAnchor.constraint(equalTo: vidrio.centerYAnchor),
+        ])
+        contentView = vidrio
+    }
+}
+
+/// La línea con sus pastillas (o la perilla del cruce). Cambia el cursor y avisa arrastres, el doble clic y un clic
+/// sin arrastrar (para el menú). Pasando el mouse, la pastilla se pinta de celeste.
 private final class VistaBarra: NSView {
     var tipo: TipoBarra = .vertical { didSet { if tipo != oldValue { needsDisplay = true } } }
     var pastillas: [CGFloat] = [0.5] { didSet { if pastillas != oldValue { needsDisplay = true } } }
     var mover: ((CGPoint, Bool) -> Void)?
     var centrar: (() -> Void)?
-    /// El centro de la pastilla bajo el mouse (en coordenadas de la vista), o nil al salir de las pastillas.
-    var alPasar: ((CGPoint?) -> Void)?
+    /// Un clic sin arrastrar: recibe el centro de la pastilla más cercana (en coordenadas de la vista).
+    var alTocar: ((CGPoint) -> Void)?
     private(set) var arrastrando = false
+    private var apretado: CGPoint?
     private var encima: Int?
 
     override init(frame: NSRect) {
@@ -321,7 +421,6 @@ private final class VistaBarra: NSView {
         if encima != nil {
             encima = nil
             needsDisplay = true
-            alPasar?(nil)
         }
     }
 
@@ -333,59 +432,66 @@ private final class VistaBarra: NSView {
         guard indice != encima else { return }
         encima = indice
         needsDisplay = true
-        alPasar?(indice.map { CGPoint(x: rectsPastillas[$0].midX, y: rectsPastillas[$0].midY) })
     }
 
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2 {
+            apretado = nil
             centrar?()
             return
         }
-        arrastrando = true
-        cursor.set()
-        needsDisplay = true
+        apretado = Mosaico.puntero()
     }
 
+    /// Recién después de correrse 3 pt es un arrastre (antes puede ser un clic para el menú).
     override func mouseDragged(with event: NSEvent) {
-        guard arrastrando else { return }
-        mover?(Mosaico.puntero(), false)
+        let p = Mosaico.puntero()
+        if !arrastrando {
+            guard let apretado, hypot(p.x - apretado.x, p.y - apretado.y) > 3 else { return }
+            arrastrando = true
+            cursor.set()
+            needsDisplay = true
+        }
+        mover?(p, false)
     }
 
     override func mouseUp(with event: NSEvent) {
-        guard arrastrando else { return }
-        arrastrando = false
-        cursor.set()
-        needsDisplay = true
-        mover?(Mosaico.puntero(), true)
+        defer { apretado = nil }
+        if arrastrando {
+            arrastrando = false
+            cursor.set()
+            needsDisplay = true
+            mover?(Mosaico.puntero(), true)
+            return
+        }
+        guard apretado != nil, event.clickCount == 1 else { return }
+        let p = convert(event.locationInWindow, from: nil)
+        let cercana = rectsPastillas.min { hypot($0.midX - p.x, $0.midY - p.y) < hypot($1.midX - p.x, $1.midY - p.y) }
+        if let cercana { alTocar?(CGPoint(x: cercana.midX, y: cercana.midY)) }
     }
 }
 
 // MARK: - Menú de la pastilla
 
-/// El menú chico que aparece al pasar el mouse por una pastilla: "Cambiar", "Al medio" y "Salir". Se esconde un
-/// momento después de que el mouse sale de la pastilla y del menú.
+/// El menú chico que abre un clic en una pastilla: "Cambiar", "Al medio", "Sumar app" y "Salir". Se cierra con un
+/// botón, con otro clic en la pastilla, al arrastrar la barra o con un clic en cualquier otro lado (`Mosaico`).
 private final class MenuBarra {
     private let panel = PanelesMosaico.panelFlotante()
-    private var espera: DispatchWorkItem?
     private(set) var clave: String?
-    private var encima = false
 
-    func mostrar(_ pedido: PanelesMosaico.Pedido, cerca centro: CGPoint) {
-        espera?.cancel()
+    /// Lo abre junto a la pastilla tocada; si ya estaba abierto para esa barra, lo cierra.
+    func alternar(_ pedido: PanelesMosaico.Pedido, cerca centro: CGPoint) {
+        if panel.isVisible && clave == pedido.clave {
+            ocultar()
+            return
+        }
         clave = pedido.clave
-        let vista = VistaMenuBarra(tipo: pedido.barra.tipo, cambiar: pedido.cambiar.map { accion in { [weak self] in
+        let cerrarY: (@escaping () -> Void) -> () -> Void = { accion in { [weak self] in
             self?.ocultar()
             accion()
-        } }, centrar: { [weak self] in
-            self?.ocultar()
-            pedido.centrar()
-        }, salir: { [weak self] in
-            self?.ocultar()
-            pedido.salir()
-        }) { [weak self] adentro in
-            self?.encima = adentro
-            if !adentro { self?.ocultarPronto() } else { self?.espera?.cancel() }
-        }
+        } }
+        let vista = VistaMenuBarra(tipo: pedido.barra.tipo, cambiar: pedido.cambiar.map(cerrarY), centrar: cerrarY(pedido.centrar),
+                                   sumar: pedido.sumar.map(cerrarY), salir: cerrarY(pedido.salir))
         let anfitrion = AnfitrionPrimerClic(rootView: vista)
         let tamano = anfitrion.fittingSize
         panel.contentView = anfitrion
@@ -401,29 +507,15 @@ private final class MenuBarra {
             origen.y = min(max(origen.y, pantalla.minY + 8), pantalla.maxY - tamano.height - 8)
         }
         panel.setFrame(CGRect(origin: origen, size: tamano), display: true)
-        if !panel.isVisible {
-            panel.alphaValue = 0
-            panel.orderFrontRegardless()
-            NSAnimationContext.runAnimationGroup { contexto in
-                contexto.duration = 0.12
-                panel.animator().alphaValue = 1
-            }
+        panel.alphaValue = 0
+        panel.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { contexto in
+            contexto.duration = 0.12
+            panel.animator().alphaValue = 1
         }
-    }
-
-    func ocultarPronto() {
-        espera?.cancel()
-        let espera = DispatchWorkItem { [weak self] in
-            guard let self, !self.encima else { return }
-            self.ocultar()
-        }
-        self.espera = espera
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: espera)
     }
 
     func ocultar() {
-        espera?.cancel()
-        encima = false
         clave = nil
         panel.orderOut(nil)
     }
@@ -438,8 +530,8 @@ private struct VistaMenuBarra: View {
     let tipo: TipoBarra
     let cambiar: (() -> Void)?
     let centrar: () -> Void
+    let sumar: (() -> Void)?
     let salir: () -> Void
-    let alEstarEncima: (Bool) -> Void
 
     var body: some View {
         HStack(spacing: 4) {
@@ -448,6 +540,9 @@ private struct VistaMenuBarra: View {
             }
             boton(T("Al medio", "Center"), icono: tipo == .cruce ? "plus" : (tipo == .vertical ? "arrow.left.and.right" : "arrow.up.and.down"),
                   accion: centrar)
+            if let sumar {
+                boton(T("Sumar app", "Add app"), icono: "plus.rectangle.on.rectangle", accion: sumar)
+            }
             Rectangle().fill(Color.white.opacity(0.15)).frame(width: 1, height: 30)
             boton(T("Salir", "Exit"), icono: "xmark", accion: salir)
         }
@@ -455,7 +550,6 @@ private struct VistaMenuBarra: View {
         .background(Color(white: 0.1).opacity(0.94), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
         .foregroundStyle(.white)
-        .onHover(perform: alEstarEncima)
         .fixedSize()
     }
 

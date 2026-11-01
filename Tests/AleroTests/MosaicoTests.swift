@@ -120,6 +120,19 @@ final class MosaicoTests: XCTestCase {
         XCTAssertEqual(ReglasMosaico.centrar(diagonal, .cruce), Divisiones())
     }
 
+    func testDondeSumarOtraApp() {
+        // Con lugar libre, ahí.
+        XCTAssertEqual(ReglasMosaico.dondeSumar(ocupadas: [.izquierda], divisiones: Divisiones()), .derecha)
+        // Dos mitades: se parte la más ancha (con la barra al medio, la derecha).
+        XCTAssertEqual(ReglasMosaico.dondeSumar(ocupadas: [.izquierda, .derecha], divisiones: Divisiones()), .abajoDerecha)
+        XCTAssertEqual(ReglasMosaico.dondeSumar(ocupadas: [.izquierda, .derecha], divisiones: Divisiones(x: 0.7)), .abajoIzquierda)
+        // Tres: queda la columna que todavía es una mitad.
+        XCTAssertEqual(ReglasMosaico.dondeSumar(ocupadas: [.izquierda, .arribaDerecha, .abajoDerecha], divisiones: Divisiones()), .abajoIzquierda)
+        // Cuatro, o la pantalla entera: no hay lugar.
+        XCTAssertNil(ReglasMosaico.dondeSumar(ocupadas: cuatro, divisiones: Divisiones()))
+        XCTAssertNil(ReglasMosaico.dondeSumar(ocupadas: [.completa], divisiones: Divisiones()))
+    }
+
     func testCambiarDeLado() {
         XCTAssertEqual(ReglasMosaico.intercambiar(.izquierda, .vertical), .derecha)
         XCTAssertEqual(ReglasMosaico.intercambiar(.abajoDerecha, .vertical), .abajoIzquierda)

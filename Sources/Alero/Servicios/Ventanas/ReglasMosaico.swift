@@ -184,6 +184,16 @@ enum ReglasMosaico {
         return nil
     }
 
+    /// "Sumar app" desde la barra: lo libre, si hay; si no, se parte la columna más ancha que tiene una ventana de
+    /// mitad (la nueva va al cuarto de abajo y la de antes sube al de arriba, ver `acomodar`). Nil con cuatro.
+    static func dondeSumar(ocupadas: [ZonaMosaico], divisiones d: Divisiones) -> ZonaMosaico? {
+        if let libre = libre(ocupadas: ocupadas) { return libre }
+        let mitades = [Columna.derecha, .izquierda].filter { ocupadas.contains(.mitad($0)) }
+        guard let primera = mitades.first else { return nil }
+        let ancha = mitades.count == 2 ? (d.x <= 0.5 ? Columna.derecha : .izquierda) : primera
+        return ancha == .izquierda ? .abajoIzquierda : .abajoDerecha
+    }
+
     /// Si dos zonas se pisan (comparten alguna celda).
     static func sePisan(_ a: ZonaMosaico, _ b: ZonaMosaico) -> Bool { !a.celdas.isDisjoint(with: b.celdas) }
 
