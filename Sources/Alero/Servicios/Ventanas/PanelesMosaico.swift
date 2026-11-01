@@ -3,15 +3,18 @@ import SwiftUI
 
 // Las ventanitas de "Acomodar ventanas" (ver `Mosaico`), todas en el hilo principal y ninguna activa Alero:
 // - la vista previa: un rectángulo de vidrio con borde celeste, del tamaño exacto en que va a quedar la ventana;
-// - "¿Qué va acá?": en el lugar libre, las apps abiertas y un buscador que también encuentra las instaladas
-//   (Esc o la X cancelan; un clic afuera solo la cierra);
+// - "¿Qué va acá?": el lugar libre marcado con un borde suave y, centrada en él, una tarjeta de vidrio esmerilado
+//   con un buscador, las apps abiertas arriba y todas las instaladas abajo, en orden alfabético (Esc o la X
+//   cancelan; un clic afuera de la tarjeta solo la cierra);
 // - las barras: sobre la unión entre ventanas, una línea fina con una pastilla (o la perilla del cruce, con cuatro)
 //   que se arrastra; doble clic las centra. La franja que se agarra es más ancha que la línea y tapa los bordes con
 //   que macOS agranda las ventanas, así el clic lo toma la barra. Un clic en la pastilla abre un menú chico:
 //   "Cambiar", "Al medio", "Sumar app", "Quitar app" (elegís cuál) y "Salir";
 // - las cortinas: mientras se arrastra una barra, un vidrio con el ícono de la app tapa cada ventana y va a su lugar
 //   nuevo al instante (las ventanas de verdad se mueven al soltar). Van entre las ventanas comunes y las barras, y
-//   son una capa de color, sin desenfoque: se redibujan en cada movimiento y tienen que ser livianas.
+//   son una capa de color, sin desenfoque: se redibujan en cada movimiento y tienen que ser livianas;
+// - el selector de formas: debajo del botón verde de una ventana, una tarjeta de vidrio con cuatro formas; cada
+//   parte de cada forma se ilumina al pasar el mouse y un clic pone la ventana ahí.
 // Los rectángulos llegan en coordenadas de eventos (origen arriba) y se pasan a las de AppKit (origen abajo).
 
 final class PanelesMosaico {
@@ -51,6 +54,7 @@ final class PanelesMosaico {
     private var cortinas: [CGWindowID: PanelCortina] = [:]
     private var quitando: DispatchWorkItem?
     private let menu = MenuBarra()
+    private let selector = SelectorFormas()
 
     /// Mientras se arrastra alguna barra (`Mosaico` no revisa los grupos en ese rato).
     var arrastrandoBarra: Bool { barras.values.contains { $0.vista.arrastrando } }
@@ -68,6 +72,16 @@ final class PanelesMosaico {
     }
 
     func ocultarMenu() { menu.ocultar() }
+
+    // MARK: - Selector de formas
+
+    /// `boton`: el botón verde, en coordenadas de eventos.
+    func mostrarSelector(debajoDe boton: CGRect, elegir: @escaping (ZonaMosaico, FormaMosaico) -> Void) {
+        selector.mostrar(debajoDe: PanelesMosaico.aAppKit(boton), elegir: elegir)
+    }
+
+    func ocultarSelectorPronto() { selector.ocultarPronto() }
+    func ocultarSelector() { selector.ocultar() }
 
     // MARK: - Cortinas
 
@@ -174,7 +188,8 @@ final class PanelesMosaico {
                           elegir: @escaping (AppsAbiertas.Candidata) -> Void, abrir: @escaping (URL) -> Void,
                           cancelar: @escaping () -> Void) {
         cerrarAsistente()
-        let panel = PanelAsistente(marco: PanelesMosaico.aAppKit(r).insetBy(dx: 10, dy: 10))
+        let marco = PanelesMosaico.aAppKit(r).insetBy(dx: 8, dy: 8)
+        let panel = PanelAsistente(marco: marco)
         let vista = VistaAsistente(candidatas: candidatas, abiertas: abiertas) { [weak self] elegida in
             self?.cerrarAsistente()
             elegir(elegida)
@@ -189,7 +204,19 @@ final class PanelesMosaico {
             self?.cerrarAsistente()
             cancelar()
         }
-        panel.contentView = NSHostingView(rootView: vista)
+        // El lugar, con un tinte y un borde celeste suaves; la tarjeta, centrada y con un tamaño cómodo de leer.
+        let fondo = FondoAsistente(frame: CGRect(origin: .zero, size: marco.size))
+        fondo.alClic = { [weak self] in self?.cerrarAsistente() }
+        let tamano = CGSize(width: min(marco.width - 40, 700), height: min(marco.height - 40, 620))
+        let tarjeta = TarjetaVidrio(frame: CGRect(x: (marco.width - tamano.width) / 2, y: (marco.height - tamano.height) / 2,
+                                                  width: tamano.width, height: tamano.height))
+        tarjeta.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
+        let anfitrion = NSHostingView(rootView: vista)
+        anfitrion.frame = tarjeta.bounds
+        anfitrion.autoresizingMask = [.width, .height]
+        tarjeta.addSubview(anfitrion)
+        fondo.addSubview(tarjeta)
+        panel.contentView = fondo
         panel.alphaValue = 0
         // Toma el teclado (sin activar Alero) para el buscador y para que Esc la cierre.
         panel.makeKeyAndOrderFront(nil)
@@ -268,6 +295,47 @@ private final class PanelAsistente: NSPanel {
 
     override var canBecomeKey: Bool { true }
     override func cancelOperation(_ sender: Any?) { cancelar?() }
+}
+
+/// El lugar libre de "¿Qué va acá?": un tinte oscuro suave con borde celeste. Un clic acá (afuera de la tarjeta)
+/// la cierra sin deshacer nada.
+private final class FondoAsistente: NSView {
+    var alClic: (() -> Void)?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.22).cgColor
+        layer?.cornerRadius = 14
+        layer?.borderWidth = 1.5
+        layer?.borderColor = NSColor(hex: 0x8FD8FF).withAlphaComponent(0.55).cgColor
+        autoresizingMask = [.width, .height]
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) { alClic?() }
+}
+
+/// La tarjeta de vidrio esmerilado de "¿Qué va acá?". Se queda con sus clics (si no, subirían al fondo y la cerrarían).
+private final class TarjetaVidrio: NSVisualEffectView {
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        material = .popover
+        blendingMode = .behindWindow
+        state = .active
+        wantsLayer = true
+        layer?.cornerRadius = 20
+        layer?.masksToBounds = true
+        layer?.borderWidth = 1
+        layer?.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) {}
 }
 
 /// El panel de una barra: la franja que se agarra sobre la unión.
@@ -541,6 +609,131 @@ private final class MenuBarra {
     }
 }
 
+/// El selector de formas del botón verde. Se esconde un momento después de que el mouse sale del botón y de la
+/// tarjeta, con un clic en cualquier otro lado o al elegir.
+private final class SelectorFormas {
+    private let panel = PanelesMosaico.panelFlotante()
+    private var espera: DispatchWorkItem?
+    private var encima = false
+
+    func mostrar(debajoDe boton: CGRect, elegir: @escaping (ZonaMosaico, FormaMosaico) -> Void) {
+        espera?.cancel()
+        let vista = VistaSelector { [weak self] zona, forma in
+            self?.ocultar()
+            elegir(zona, forma)
+        } alEstarEncima: { [weak self] adentro in
+            self?.encima = adentro
+            if adentro { self?.espera?.cancel() } else { self?.ocultarPronto() }
+        }
+        let tarjeta = TarjetaVidrio(frame: .zero)
+        tarjeta.material = .hudWindow
+        tarjeta.layer?.cornerRadius = 16
+        let anfitrion = AnfitrionPrimerClic(rootView: vista)
+        let tamano = anfitrion.fittingSize
+        tarjeta.frame = CGRect(origin: .zero, size: tamano)
+        anfitrion.frame = tarjeta.bounds
+        anfitrion.autoresizingMask = [.width, .height]
+        tarjeta.addSubview(anfitrion)
+        panel.contentView = tarjeta
+        // Debajo del botón, alineado con su borde izquierdo y sin salirse de la pantalla.
+        var origen = CGPoint(x: boton.minX - 14, y: boton.minY - tamano.height - 8)
+        if let pantalla = NSScreen.screens.first(where: { $0.frame.contains(CGPoint(x: boton.midX, y: boton.midY)) })?.visibleFrame {
+            origen.x = min(max(origen.x, pantalla.minX + 8), pantalla.maxX - tamano.width - 8)
+            origen.y = max(origen.y, pantalla.minY + 8)
+        }
+        panel.setFrame(CGRect(origin: origen, size: tamano), display: true)
+        guard !panel.isVisible else { return }
+        panel.alphaValue = 0
+        panel.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { contexto in
+            contexto.duration = 0.14
+            panel.animator().alphaValue = 1
+        }
+    }
+
+    func ocultarPronto() {
+        guard panel.isVisible else { return }
+        espera?.cancel()
+        let espera = DispatchWorkItem { [weak self] in
+            guard let self, !self.encima else { return }
+            self.ocultar()
+        }
+        self.espera = espera
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: espera)
+    }
+
+    func ocultar() {
+        espera?.cancel()
+        encima = false
+        panel.orderOut(nil)
+    }
+}
+
+private struct VistaSelector: View {
+    let elegir: (ZonaMosaico, FormaMosaico) -> Void
+    let alEstarEncima: (Bool) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(T("Acomodar esta ventana", "Arrange this window")).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                ForEach(FormaMosaico.allCases) { forma in DibujoForma(forma: forma, elegir: elegir) }
+            }
+        }
+        .padding(12)
+        .foregroundStyle(.white)
+        .environment(\.colorScheme, .dark)
+        .onHover(perform: alEstarEncima)
+        .fixedSize()
+    }
+}
+
+/// Una forma del selector: un rectángulo chico de pantalla partido en sus zonas; cada zona es un botón.
+private struct DibujoForma: View {
+    let forma: FormaMosaico
+    let elegir: (ZonaMosaico, FormaMosaico) -> Void
+    private let tamano = CGSize(width: 76, height: 50)
+    private let espacio: CGFloat = 3
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(Array(forma.zonas.enumerated()), id: \.offset) { _, zona in
+                ParteForma { elegir(zona, forma) }
+                    .frame(width: rect(zona).width, height: rect(zona).height)
+                    .offset(x: rect(zona).minX, y: rect(zona).minY)
+            }
+        }
+        .frame(width: tamano.width, height: tamano.height, alignment: .topLeading)
+        .padding(4)
+        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+    }
+
+    /// La zona dentro del dibujo (con un espacio chico entre partes, para que se vean separadas).
+    private func rect(_ zona: ZonaMosaico) -> CGRect {
+        let r = ReglasMosaico.marco(zona, en: CGRect(origin: .zero, size: tamano))
+        let medio = espacio / 2
+        return CGRect(x: r.minX + (r.minX > 0 ? medio : 0), y: r.minY + (r.minY > 0 ? medio : 0),
+                      width: r.width - (r.minX > 0 ? medio : 0) - (r.maxX < tamano.width ? medio : 0),
+                      height: r.height - (r.minY > 0 ? medio : 0) - (r.maxY < tamano.height ? medio : 0))
+    }
+}
+
+private struct ParteForma: View {
+    let accion: () -> Void
+    @State private var encima = false
+
+    var body: some View {
+        Button(action: accion) {
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(encima ? Color(nsColor: NSColor(hex: 0x8FD8FF)) : Color.white.opacity(0.22))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { encima = $0 }
+        .animation(.easeOut(duration: 0.1), value: encima)
+    }
+}
+
 /// Un NSHostingView que acepta el primer clic: Alero no está activa y los botones tienen que andar al toque.
 private final class AnfitrionPrimerClic<V: View>: NSHostingView<V> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -637,62 +830,64 @@ private struct VistaAsistente: View {
     @State private var instaladas: [AppsAbiertas.Instalada] = []
     @FocusState private var enfocado: Bool
 
-    private let columnas = [GridItem(.adaptive(minimum: 132, maximum: 180), spacing: 10)]
+    private let columnasAbiertas = [GridItem(.adaptive(minimum: 128, maximum: 170), spacing: 10)]
+    private let columnasTodas = [GridItem(.adaptive(minimum: 190), spacing: 6)]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(T("¿Qué va acá?", "What goes here?")).font(.system(size: 17, weight: .semibold))
-                    Text(T("Elegí una app abierta o buscá otra.", "Pick an open app or search for another."))
-                        .font(.system(size: 12)).foregroundStyle(.secondary)
-                }
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 10) {
+                Text(T("¿Qué va acá?", "What goes here?")).font(.system(size: 18, weight: .semibold))
                 Spacer()
                 Button(action: cancelar) {
-                    Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).frame(width: 24, height: 24)
+                    Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).frame(width: 26, height: 26)
                         .background(Color.primary.opacity(0.08), in: Circle())
                 }
                 .buttonStyle(.plain)
                 .help(T("Cancelar (Esc)", "Cancel (Esc)"))
             }
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
                 TextField(T("Buscar una app", "Search for an app"), text: $busqueda)
-                    .textFieldStyle(.plain).font(.system(size: 13)).focused($enfocado)
+                    .textFieldStyle(.plain).font(.system(size: 14)).focused($enfocado)
                     .onSubmit(elegirPrimera)
+                if !busqueda.isEmpty {
+                    Button { busqueda = "" } label: {
+                        Image(systemName: "xmark.circle.fill").font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-            .padding(.horizontal, 10).frame(height: 30)
-            .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 12) {
+            .padding(.horizontal, 12).frame(height: 36)
+            .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 18) {
                     if !abiertasFiltradas.isEmpty {
-                        LazyVGrid(columns: columnas, spacing: 10) {
-                            ForEach(abiertasFiltradas) { c in
-                                TarjetaApp(icono: icono(c.pid), nombre: c.app, detalle: detalle(c)) { elegir(c) }
+                        seccion(T("Abiertas", "Open"), cantidad: abiertasFiltradas.count) {
+                            LazyVGrid(columns: columnasAbiertas, spacing: 10) {
+                                ForEach(abiertasFiltradas) { c in
+                                    TarjetaApp(icono: icono(c.pid), nombre: c.app, detalle: detalle(c)) { elegir(c) }
+                                }
                             }
                         }
                     }
                     if !instaladasFiltradas.isEmpty {
-                        Text(T("Otras apps", "Other apps")).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                        LazyVGrid(columns: columnas, spacing: 10) {
-                            ForEach(instaladasFiltradas) { app in
-                                TarjetaApp(icono: NSWorkspace.shared.icon(forFile: app.url.path), nombre: app.nombre,
-                                           detalle: T("Abrirla acá", "Open it here")) { abrir(app.url) }
+                        seccion(T("Todas las apps", "All apps"), cantidad: instaladasFiltradas.count) {
+                            LazyVGrid(columns: columnasTodas, alignment: .leading, spacing: 2) {
+                                ForEach(instaladasFiltradas) { app in FilaInstalada(app: app) { abrir(app.url) } }
                             }
                         }
                     }
-                    if abiertasFiltradas.isEmpty && instaladasFiltradas.isEmpty {
+                    if abiertasFiltradas.isEmpty && instaladasFiltradas.isEmpty && !instaladas.isEmpty {
                         Text(T("Ninguna app con «\(busqueda)».", "No app matches “\(busqueda)”."))
-                            .font(.system(size: 12)).foregroundStyle(.secondary)
+                            .font(.system(size: 13)).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center).padding(.top, 20)
                     }
                 }
+                .padding(.bottom, 4)
             }
         }
-        .padding(18)
+        .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .strokeBorder(Color(nsColor: NSColor(hex: 0x8FD8FF)).opacity(0.6), lineWidth: 1.5))
         .onAppear {
             DispatchQueue.main.async { enfocado = true }
             DispatchQueue.global(qos: .userInitiated).async {
@@ -702,17 +897,28 @@ private struct VistaAsistente: View {
         }
     }
 
+    private func seccion<C: View>(_ titulo: String, cantidad: Int, @ViewBuilder contenido: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text(titulo.uppercased()).font(.system(size: 11, weight: .semibold)).tracking(0.6).foregroundStyle(.secondary)
+                Text("\(cantidad)").font(.system(size: 10, weight: .semibold).monospacedDigit()).foregroundStyle(.secondary)
+                    .padding(.horizontal, 6).padding(.vertical, 1)
+                    .background(Color.primary.opacity(0.08), in: Capsule())
+            }
+            contenido()
+        }
+    }
+
     private var abiertasFiltradas: [AppsAbiertas.Candidata] {
         let texto = busqueda.trimmingCharacters(in: .whitespaces)
         guard !texto.isEmpty else { return candidatas }
         return candidatas.filter { coincide($0.app, texto) || coincide($0.titulo, texto) }
     }
 
-    /// Las instaladas aparecen solo buscando, y sin las que ya están abiertas.
+    /// Todas las instaladas que no están abiertas (las abiertas van arriba), filtradas por lo buscado.
     private var instaladasFiltradas: [AppsAbiertas.Instalada] {
         let texto = busqueda.trimmingCharacters(in: .whitespaces)
-        guard !texto.isEmpty else { return [] }
-        return Array(instaladas.filter { coincide($0.nombre, texto) && !abiertas.contains($0.nombre) }.prefix(12))
+        return instaladas.filter { !abiertas.contains($0.nombre) && (texto.isEmpty || coincide($0.nombre, texto)) }
     }
 
     private func coincide(_ nombre: String, _ texto: String) -> Bool {
@@ -735,6 +941,28 @@ private struct VistaAsistente: View {
 
     private func icono(_ pid: pid_t) -> NSImage {
         NSRunningApplication(processIdentifier: pid)?.icon ?? NSWorkspace.shared.icon(for: .application)
+    }
+}
+
+/// Una app instalada en la lista de "Todas las apps": ícono chico y nombre, en una fila.
+private struct FilaInstalada: View {
+    let app: AppsAbiertas.Instalada
+    let accion: () -> Void
+    @State private var encima = false
+
+    var body: some View {
+        Button(action: accion) {
+            HStack(spacing: 9) {
+                Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path)).resizable().frame(width: 22, height: 22)
+                Text(app.nombre).font(.system(size: 12.5)).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8).frame(height: 32)
+            .background(Color.primary.opacity(encima ? 0.09 : 0), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { encima = $0 }
     }
 }
 

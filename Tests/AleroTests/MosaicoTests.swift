@@ -71,6 +71,15 @@ final class MosaicoTests: XCTestCase {
         XCTAssertNil(ReglasMosaico.libre(ocupadas: [.completa]))
     }
 
+    func testLoLibreSegunLaFormaElegida() {
+        // Con cuatro cuartos, después del primero se ofrece otro cuarto (no la mitad).
+        XCTAssertEqual(ReglasMosaico.libre(ocupadas: [.arribaIzquierda], plantilla: FormaMosaico.cuartos.zonas), .arribaDerecha)
+        XCTAssertEqual(ReglasMosaico.libre(ocupadas: [.arribaIzquierda, .arribaDerecha], plantilla: FormaMosaico.cuartos.zonas), .abajoIzquierda)
+        // Mitad y dos cuartos, empezando por un cuarto de la derecha.
+        XCTAssertEqual(ReglasMosaico.libre(ocupadas: [.abajoDerecha], plantilla: FormaMosaico.mitadYCuartos.zonas), .izquierda)
+        XCTAssertNil(ReglasMosaico.libre(ocupadas: [.izquierda, .derecha], plantilla: FormaMosaico.mitades.zonas))
+    }
+
     func testSumarUnaTerceraApp() {
         // Dos mitades y una nueva arriba a la derecha: la de la derecha baja al cuarto de abajo.
         XCTAssertEqual(ReglasMosaico.acomodar(.arribaDerecha, entre: [.izquierda, .derecha]), [.izquierda, .abajoDerecha])

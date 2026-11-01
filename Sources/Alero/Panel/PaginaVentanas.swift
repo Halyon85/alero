@@ -19,7 +19,13 @@ struct PaginaVentanas: View {
             FilaLlave(titulo: T("Acomodar ventanas", "Arrange windows"),
                       detalle: T("Llevá una ventana contra un borde o una esquina de la pantalla y Alero la acomoda. Mientras está prendido, Alero apaga el acomodo propio de macOS y, al apagarlo, lo deja como estaba.",
                                  "Drag a window against an edge or a corner of the screen and Alero arranges it. While it's on, Alero turns off macOS's own tiling and puts it back as it was when you turn this off."),
-                      divisor: false, valor: $ajustes.mosaico)
+                      divisor: ajustes.mosaico, valor: $ajustes.mosaico)
+            if ajustes.mosaico {
+                FilaLlave(titulo: T("Formas en el botón verde", "Layouts on the green button"),
+                          detalle: T("Dejá el mouse un momento sobre el botón verde de una ventana y elegí dónde va: completa, mitad y mitad, mitad y dos cuartos o cuatro cuartos.",
+                                     "Hold the pointer on a window's green button for a moment and pick where it goes: full, half and half, half and two quarters, or four quarters."),
+                          divisor: false, valor: $ajustes.mosaicoSelector)
+            }
         }
         if ajustes.mosaico && deMacOS {
             AvisoTarjeta(tono: .info, titulo: T("macOS también acomoda ventanas", "macOS arranges windows too"),

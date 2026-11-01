@@ -15,6 +15,8 @@ import Combine
 //   los saltos, porque cada una tarda distinto en redibujarse. Doble clic la centra. Con cuatro, en el cruce hay una
 //   perilla que va en diagonal. Un clic en la pastilla abre "Cambiar" (de lado), "Al medio", "Sumar app" y "Salir"
 //   (todas vuelven a como estaban). Si estirás una ventana desde su borde o su esquina, las demás se tapan y la siguen;
+// - con el selector prendido, dejar el mouse un momento sobre el botón verde de una ventana muestra las formas
+//   (completa, mitades, mitad y dos cuartos, cuatro cuartos): tocás dónde va esa ventana y lo demás sigue esa forma;
 // - una ventana sale del grupo si la arrastrás afuera (vuelve a su tamaño de antes), la cerrás, la minimizás o la
 //   quitás desde el menú ("Quitar app": vuelve a como estaba). Las que quedan se agrandan para no dejar huecos, y
 //   si queda una sola, el acomodo se termina y esa también vuelve a como estaba. Si una app se corre sola unos
@@ -44,6 +46,8 @@ final class Mosaico {
         var pantalla: PantallaCG
         var divisiones = Divisiones()
         var miembros: [Miembro] = []
+        /// La forma elegida en el selector del botón verde (lo que se ofrece después la sigue). Nil si se arrastró.
+        var plantilla: [ZonaMosaico]?
         var ocupadas: [ZonaMosaico] { miembros.map(\.zona) }
         var barras: [BarraMosaico] { ReglasMosaico.barras(ocupadas: ocupadas, en: pantalla.visible, divisiones: divisiones) }
     }
@@ -73,16 +77,21 @@ final class Mosaico {
     private var pendiente: (pantalla: PantallaCG, corregir: Bool, excepto: CGWindowID?, quitarCortinas: Bool)?
     /// Una ventana del grupo que la persona está estirando desde su borde (las demás se tapan y la siguen).
     private var estirada: (id: CGWindowID, pantalla: PantallaCG)?
+    /// La ventana cuyo botón verde tiene el mouse encima (esperando para mostrar el selector).
+    private var verde: CGWindowID?
+    private var esperaVerde: DispatchWorkItem?
+    private var ultimoMovimiento: CFTimeInterval = 0
 
     /// La llama `Delegado` al arrancar, una vez.
     func arrancar() {
         Pantallas.shared.arrancar()
-        Ajustes.shared.$mosaico.removeDuplicates()
-            .sink { [weak self] prender in self?.prender(prender) }
+        Ajustes.shared.$mosaico.combineLatest(Ajustes.shared.$mosaicoSelector)
+            .removeDuplicates { $0 == $1 }
+            .sink { [weak self] prender, selector in self?.prender(prender, selector: selector) }
             .store(in: &suscripciones)
     }
 
-    private func prender(_ prender: Bool) {
+    private func prender(_ prender: Bool, selector: Bool) {
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
         guard prender else {
@@ -94,7 +103,10 @@ final class Mosaico {
             return
         }
         MosaicoDeMacOS.apagar()
-        monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]) { [weak self] evento in
+        // El movimiento del mouse solo se mira para el selector del botón verde.
+        var eventos: NSEvent.EventTypeMask = [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
+        if selector { eventos.insert(.mouseMoved) } else { paneles.ocultarSelector() }
+        monitor = NSEvent.addGlobalMonitorForEvents(matching: eventos) { [weak self] evento in
             self?.recibir(evento)
         }
     }
@@ -111,6 +123,7 @@ final class Mosaico {
         case .leftMouseDown: empezar(en: p)
         case .leftMouseDragged: arrastre == nil ? seguirEstirando() : seguir(en: p)
         case .leftMouseUp: estirada == nil ? soltar() : soltarEstirada()
+        case .mouseMoved: mirarVerde(p)
         default: break
         }
     }
@@ -122,6 +135,7 @@ final class Mosaico {
     private func empezar(en p: CGPoint) {
         paneles.cerrarAsistente()
         paneles.ocultarMenu()
+        paneles.ocultarSelector()
         arrastre = nil
         guard let v = VentanasVisibles.bajo(p), p.y - v.marco.minY <= 60 else { return }
         arrastre = Arrastre(id: v.id, pid: v.pid, inicial: v.marco, actual: v.marco)
@@ -210,8 +224,9 @@ final class Mosaico {
 
     /// Suma una ventana recién acomodada a su grupo: las que pisa salen, y si cae en un cuarto de una columna que
     /// ocupaba una mitad, esa pasa al otro cuarto. Después ofrece lo que quedó libre. `nuevo`: la acomodó la
-    /// persona arrastrándola (si cancela "¿Qué va acá?" enseguida, vuelve a como estaba).
-    private func sumar(_ miembro: Miembro, en pantalla: PantallaCG, nuevo: Bool) {
+    /// persona arrastrándola o desde el selector (si cancela "¿Qué va acá?" enseguida, vuelve a como estaba).
+    /// `plantilla`: la forma elegida en el selector; una ventana nueva arrastrada a mano la borra (ya no se sigue).
+    private func sumar(_ miembro: Miembro, en pantalla: PantallaCG, nuevo: Bool, plantilla: [ZonaMosaico]? = nil) {
         let i: Int
         if let existente = grupos.firstIndex(where: { $0.pantalla == pantalla }) {
             i = existente
@@ -219,6 +234,7 @@ final class Mosaico {
             grupos.append(Grupo(pantalla: pantalla))
             i = grupos.count - 1
         }
+        if let plantilla { grupos[i].plantilla = plantilla } else if nuevo { grupos[i].plantilla = nil }
         let otros = grupos[i].miembros.filter { $0.id != miembro.id }
         let zonas = ReglasMosaico.acomodar(miembro.zona, entre: otros.map(\.zona))
         var quedan: [Miembro] = []
@@ -250,8 +266,9 @@ final class Mosaico {
     }
 
     /// Saca una ventana de su grupo. Las que quedan se agrandan (`ReglasMosaico.quitar`); si queda una sola, el
-    /// acomodo se termina y vuelve a como estaba. `devolver`: la que sale también vuelve a como estaba ("Quitar app")
-    /// y las del grupo se traen adelante, así no quedan tapadas.
+    /// acomodo se termina y vuelve a como estaba. `devolver`: la que sale también vuelve a como estaba ("Quitar app"),
+    /// primero, y después las que quedan se traen adelante: si no, la que sale (la última tocada, y quizás grande)
+    /// las tapaba y parecía que se había quitado la otra.
     private func quitarDelGrupo(_ id: CGWindowID, en pantalla: PantallaCG, devolver: Bool) {
         guard let i = grupos.firstIndex(where: { $0.pantalla == pantalla }),
               let k = grupos[i].miembros.firstIndex(where: { $0.id == id }) else { return }
@@ -262,8 +279,11 @@ final class Mosaico {
             vigilar()
             mostrarBarras(visibles: VentanasVisibles.todas())
             AX.cola.async {
-                for m in restantes { Mosaico.ponerMarco(m.ventana, pid: m.pid, m.antes) }
                 if devolver { Mosaico.ponerMarco(quitado.ventana, pid: quitado.pid, quitado.antes) }
+                for m in restantes {
+                    Mosaico.ponerMarco(m.ventana, pid: m.pid, m.antes)
+                    if devolver { Mosaico.traerAdelante(m.ventana, pid: m.pid) }
+                }
             }
             return
         }
@@ -273,7 +293,7 @@ final class Mosaico {
         if devolver {
             AX.cola.async {
                 Mosaico.ponerMarco(quitado.ventana, pid: quitado.pid, quitado.antes)
-                for m in quedan { AXUIElementPerformAction(m.ventana, kAXRaiseAction as CFString) }
+                for m in quedan { Mosaico.traerAdelante(m.ventana, pid: m.pid) }
             }
         }
         cubrir(grupos[i])
@@ -375,7 +395,10 @@ final class Mosaico {
     /// Ofrece en lo que quedó libre todas las apps abiertas que no están acomodadas (y el buscador de las demás).
     /// `deshacer`: la ventana que se acaba de acomodar sola (cancelar con la X o Esc la devuelve a como estaba).
     private func ofrecerLibre(_ grupo: Grupo, deshacer: Miembro?) {
-        guard let libre = ReglasMosaico.libre(ocupadas: grupo.ocupadas) else { paneles.cerrarAsistente(); return }
+        guard let libre = ReglasMosaico.libre(ocupadas: grupo.ocupadas, plantilla: grupo.plantilla) else {
+            paneles.cerrarAsistente()
+            return
+        }
         ofrecer(en: libre, grupo: grupo, deshacer: deshacer)
     }
 
@@ -466,6 +489,64 @@ final class Mosaico {
         Mosaico.colocar(ventana, pid: pid, en: destino) { [weak self] quedo in
             DispatchQueue.main.async {
                 self?.sumar(Miembro(id: id, pid: pid, ventana: ventana, zona: zona, quedo: quedo, antes: antes), en: pantalla, nuevo: false)
+            }
+        }
+    }
+
+    // MARK: - Selector del botón verde
+
+    /// El mouse se movió (como mucho cada 50 ms): si quedó sobre la zona del botón verde de una ventana, se espera
+    /// un momento y se confirma con Accesibilidad que es el botón. Si se fue, el selector se esconde un momento
+    /// después (salvo que el mouse entre al selector mismo, que lo mantiene).
+    private func mirarVerde(_ p: CGPoint) {
+        let ahora = CACurrentMediaTime()
+        guard ahora - ultimoMovimiento > 0.05, arrastre == nil else { return }
+        ultimoMovimiento = ahora
+        guard let v = VentanasVisibles.bajo(p), BotonVerde.enZonaDelVerde(p, ventana: v.marco) else {
+            esperaVerde?.cancel()
+            verde = nil
+            paneles.ocultarSelectorPronto()
+            return
+        }
+        guard verde != v.id else { return }
+        verde = v.id
+        esperaVerde?.cancel()
+        let espera = DispatchWorkItem { [weak self] in self?.confirmarVerde(v) }
+        esperaVerde = espera
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: espera)
+    }
+
+    private func confirmarVerde(_ v: VentanaVisible) {
+        let p = Mosaico.puntero()
+        guard verde == v.id, BotonVerde.enZonaDelVerde(p, ventana: v.marco) else { return }
+        AX.cola.async { [weak self] in
+            guard let elemento = AX.elemento(en: p), AX.pid(elemento) == v.pid,
+                  let subrol = AX.texto(elemento, kAXSubroleAttribute),
+                  subrol == kAXZoomButtonSubrole || subrol == kAXFullScreenButtonSubrole,
+                  let boton = AX.marco(elemento), let ventana = AX.elemento(elemento, kAXWindowAttribute),
+                  AX.sePuedeCambiar(ventana, kAXSizeAttribute) else { return }
+            DispatchQueue.main.async {
+                guard let self, self.verde == v.id else { return }
+                self.paneles.mostrarSelector(debajoDe: boton) { zona, forma in
+                    self.ponerDesdeSelector(ventana, v, en: zona, forma: forma)
+                }
+            }
+        }
+    }
+
+    /// Una zona elegida en el selector: la ventana va ahí (si estaba en un grupo, sale primero), el grupo toma la
+    /// forma elegida como plantilla y se ofrece lo que sigue.
+    private func ponerDesdeSelector(_ ventana: AXUIElement, _ v: VentanaVisible, en zona: ZonaMosaico, forma: FormaMosaico) {
+        guard let pantalla = Geometria.pantalla(de: v.marco, en: Pantallas.shared.actuales) else { return }
+        for i in grupos.indices { grupos[i].miembros.removeAll { $0.id == v.id } }
+        grupos.removeAll { $0.miembros.isEmpty }
+        let destino = marco(zona, en: pantalla)
+        AX.cola.async { [weak self] in
+            Mosaico.colocar(ventana, pid: v.pid, en: destino) { quedo in
+                DispatchQueue.main.async {
+                    self?.sumar(Miembro(id: v.id, pid: v.pid, ventana: ventana, zona: zona, quedo: quedo, antes: v.marco),
+                                en: pantalla, nuevo: true, plantilla: forma.zonas)
+                }
             }
         }
     }

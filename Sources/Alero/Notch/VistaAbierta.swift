@@ -204,12 +204,19 @@ struct Reproductor: View {
                 .animation(.spring(response: 0.4, dampingFraction: 0.8), value: pista.sonando)
                 .id(pista.titulo)
                 .transition(.opacity.animation(.easeInOut(duration: 0.35)))
+                // Un clic en la carátula o el título lleva a la app que suena (y a su pestaña, si es un navegador).
+                .contentShape(Rectangle())
+                .onTapGesture { musica.mostrarApp() }
+                .help(irALaApp)
 
                 VStack(alignment: .leading, spacing: 9) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(pista.titulo).font(.system(size: 15, weight: .semibold)).lineLimit(1)
                         Text(pista.artista).font(.system(size: 12)).foregroundStyle(Tema.textoNotchSuave).lineLimit(1)
                     }
+                    .contentShape(Rectangle())
+                    .onTapGesture { musica.mostrarApp() }
+                    .help(irALaApp)
                     Progreso(pista: pista)
                     controles(sonando: pista.sonando)
                 }
@@ -228,6 +235,11 @@ struct Reproductor: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+
+    private var irALaApp: String {
+        let nombre = musica.aplicacion.flatMap { NSRunningApplication.runningApplications(withBundleIdentifier: $0).first?.localizedName }
+        return nombre.map { T("Ir a \($0)", "Go to \($0)") } ?? T("Ir a la app", "Go to the app")
     }
 
     private func controles(sonando: Bool) -> some View {

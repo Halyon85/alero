@@ -79,6 +79,8 @@ final class Ajustes: ObservableObject {
     @Published var botonVerde: Bool { didSet { guardar(botonVerde, "ventanas.botonVerde") } }
     /// Acomodar ventanas arrastrándolas a los bordes, llenar el resto y la barra entre ellas (`Mosaico`).
     @Published var mosaico: Bool { didSet { guardar(mosaico, "ventanas.mosaico") } }
+    /// Con `mosaico` prendido: el selector de formas al dejar el mouse sobre el botón verde de una ventana.
+    @Published var mosaicoSelector: Bool { didSet { guardar(mosaicoSelector, "ventanas.selector") } }
 
     // Botones del mouse
     @Published var botonesMouse: Bool { didSet { guardar(botonesMouse, "botones.activo") } }
@@ -148,7 +150,7 @@ final class Ajustes: ObservableObject {
             "aviso.salida": true, "aviso.corriente": true, "aviso.descargas": true,
             "mezclador.activo": true, "mezclador.recordar": true, "brillo.monitores": true, "brillo.teclasPuntero": true,
             "scroll.suave": true, "scroll.respuesta": 65.0, "scroll.paso": 40.0, "scroll.invertir": false,
-            "dock.minimizar": true, "dock.alternarVentanas": true, "dock.modo": ModoDock.minimizar.rawValue, "ventanas.botonVerde": false, "ventanas.mosaico": false,
+            "dock.minimizar": true, "dock.alternarVentanas": true, "dock.modo": ModoDock.minimizar.rawValue, "ventanas.botonVerde": false, "ventanas.mosaico": false, "ventanas.selector": true,
             "botones.activo": false, "botones.rueda": Ajustes.porDefecto(.rueda).datos(),
             "botones.4": Ajustes.porDefecto(.cuatro).datos(), "botones.5": Ajustes.porDefecto(.cinco).datos(),
             "finder.cortar": false,
@@ -194,6 +196,7 @@ final class Ajustes: ObservableObject {
         dockModo = ModoDock(rawValue: guardado.string(forKey: "dock.modo") ?? "") ?? .minimizar
         botonVerde = guardado.bool(forKey: "ventanas.botonVerde")
         mosaico = guardado.bool(forKey: "ventanas.mosaico")
+        mosaicoSelector = guardado.bool(forKey: "ventanas.selector")
         botonesMouse = guardado.bool(forKey: "botones.activo")
         botonRueda = ConfigBoton.leer(guardado.data(forKey: "botones.rueda"), siNo: Ajustes.porDefecto(.rueda))
         boton4 = ConfigBoton.leer(guardado.data(forKey: "botones.4"), siNo: Ajustes.porDefecto(.cuatro))

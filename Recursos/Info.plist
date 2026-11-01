@@ -39,7 +39,7 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>El teleprompter en modo voz escucha lo que leés para avanzar el guion. No se graba ni se guarda nada.</string>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Para cortar y pegar archivos con ⌘X y ⌘V, Alero le pregunta a Finder qué archivos elegiste y qué carpeta tenés abierta. Y si al limpiar o desinstalar algo necesita permiso de administrador, se lo pasa a Finder para que lo mande a la Papelera (Finder te pide la contraseña, no Alero).</string>
+	<string>Para cortar y pegar archivos con ⌘X y ⌘V, Alero le pregunta a Finder qué archivos elegiste y qué carpeta tenés abierta. Y si al limpiar o desinstalar algo necesita permiso de administrador, se lo pasa a Finder para que lo mande a la Papelera (Finder te pide la contraseña, no Alero). Al tocar lo que suena en el notch, le pide a tu navegador que muestre esa pestaña.</string>
 	<key>NSDesktopFolderUsageDescription</key>
 	<string>Para guardar tus capturas de pantalla, para mover los archivos que cortás con ⌘X y pegás con ⌘V en Finder y para encontrar capturas viejas cuando limpiás la Mac (solo las que elijas van a la Papelera).</string>
 	<key>NSDocumentsFolderUsageDescription</key>

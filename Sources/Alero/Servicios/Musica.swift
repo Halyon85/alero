@@ -30,6 +30,8 @@ final class Musica: ObservableObject {
     /// Color promedio de la carátula, aclarado para que se vea sobre negro.
     @Published private(set) var color: Color = Tema.acento
     @Published private(set) var disponible = false
+    /// La app que está sonando (la "madre" si suena desde una pestaña o un ayudante: Chrome, no su proceso de video).
+    @Published private(set) var aplicacion: String?
 
     private var proceso: Process?
     private var datos: [String: Any] = [:]
@@ -210,6 +212,7 @@ final class Musica: ObservableObject {
         }
         espera = 2
         let nueva = Musica.pista(de: datos)
+        let app = (datos["parentApplicationBundleIdentifier"] as? String) ?? (datos["bundleIdentifier"] as? String)
         let base64 = datos["artworkData"] as? String
         let cambioCaratula = base64 != ultimaCaratula
         ultimaCaratula = base64
@@ -219,11 +222,74 @@ final class Musica: ObservableObject {
             // Lo que se leyó justo antes de detener no vuelve a mostrar una canción con la música apagada.
             guard let self, !self.detenida else { return }
             self.pista = nueva
+            self.aplicacion = app
             if cambioCaratula {
                 self.caratula = imagen
                 self.color = tono ?? Tema.acento
             }
         }
+    }
+
+    // MARK: - Ir a la app que suena
+
+    /// Navegadores con AppleScript para elegir pestaña (Chrome y los que comparten su diccionario, y Safari).
+    private static let tipoChrome: Set<String> = ["com.google.Chrome", "com.google.Chrome.beta", "com.brave.Browser",
+                                                   "com.microsoft.edgemac", "com.vivaldi.Vivaldi", "com.operasoftware.Opera"]
+
+    /// Un clic en la carátula o el título del notch abierto: trae adelante la app que está sonando. Si es un
+    /// navegador, también la pestaña que suena (la que tiene el título en su nombre: "Video - YouTube"); la primera
+    /// vez macOS pide permiso para controlar ese navegador. Si no la encuentra, trae el navegador igual.
+    /// Main thread (NSAppleScript no se puede usar en otro).
+    func mostrarApp() {
+        guard let id = aplicacion, let app = NSRunningApplication.runningApplications(withBundleIdentifier: id).first else { return }
+        if app.isHidden { app.unhide() }
+        if let titulo = pista?.titulo, Musica.elegirPestana(titulo, en: id) { return }
+        app.activate()
+    }
+
+    private static func elegirPestana(_ titulo: String, en id: String) -> Bool {
+        let buscado = titulo.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        let codigo: String
+        if tipoChrome.contains(id) {
+            codigo = """
+            tell application id "\(id)"
+                repeat with w in windows
+                    set i to 0
+                    repeat with t in tabs of w
+                        set i to i + 1
+                        if title of t contains "\(buscado)" then
+                            set active tab index of w to i
+                            set index of w to 1
+                            activate
+                            return true
+                        end if
+                    end repeat
+                end repeat
+            end tell
+            return false
+            """
+        } else if id == "com.apple.Safari" {
+            codigo = """
+            tell application id "com.apple.Safari"
+                repeat with w in windows
+                    repeat with t in tabs of w
+                        if name of t contains "\(buscado)" then
+                            set current tab of w to t
+                            set index of w to 1
+                            activate
+                            return true
+                        end if
+                    end repeat
+                end repeat
+            end tell
+            return false
+            """
+        } else {
+            return false
+        }
+        var error: NSDictionary?
+        let resultado = NSAppleScript(source: codigo)?.executeAndReturnError(&error)
+        return error == nil && resultado?.booleanValue == true
     }
 
     /// Lo más grande que se dibuja la carátula: 96 pt en el notch abierto, en pantallas Retina (2×).

@@ -51,6 +51,23 @@ enum ZonaMosaico: CaseIterable {
     static func mitad(_ columna: Columna) -> ZonaMosaico { columna == .izquierda ? .izquierda : .derecha }
 }
 
+/// Las formas del selector del botón verde: cómo queda repartida la pantalla. Al elegir una, sus zonas son la
+/// "plantilla" del grupo: lo que se ofrece después sigue esa forma (con cuatro cuartos, lo libre es otro cuarto).
+enum FormaMosaico: CaseIterable, Identifiable {
+    case completa, mitades, mitadYCuartos, cuartos
+
+    var id: Self { self }
+
+    var zonas: [ZonaMosaico] {
+        switch self {
+        case .completa: return [.completa]
+        case .mitades: return [.izquierda, .derecha]
+        case .mitadYCuartos: return [.izquierda, .arribaDerecha, .abajoDerecha]
+        case .cuartos: return [.arribaIzquierda, .arribaDerecha, .abajoIzquierda, .abajoDerecha]
+        }
+    }
+}
+
 /// Dónde están las barras de un grupo, como fracción del ancho y del alto visibles (0,5 = al medio). Cada columna
 /// tiene su propia barra horizontal.
 struct Divisiones: Equatable {
@@ -173,8 +190,10 @@ enum ReglasMosaico {
     /// Lo que queda libre con esas zonas ocupadas, como una sola zona para ofrecer otra app: una mitad entera si
     /// está libre; si no, la primera esquina libre (de arriba a la izquierda, en el sentido del reloj). Nil si no
     /// hay nada ocupado, si está todo lleno o si una ocupa la pantalla entera.
-    static func libre(ocupadas: [ZonaMosaico]) -> ZonaMosaico? {
+    /// Con `plantilla` (la forma elegida en el selector), la primera zona de la plantilla que no pisa a ninguna ocupada.
+    static func libre(ocupadas: [ZonaMosaico], plantilla: [ZonaMosaico]? = nil) -> ZonaMosaico? {
         guard !ocupadas.isEmpty, !ocupadas.contains(.completa) else { return nil }
+        if let plantilla { return plantilla.first { zona in !ocupadas.contains { sePisan($0, zona) } } }
         let usadas = ocupadas.reduce(into: Set<Celda>()) { $0.formUnion($1.celdas) }
         let libres = Set(Celda.allCases).subtracting(usadas)
         for mitad in [ZonaMosaico.derecha, .izquierda] where mitad.celdas.isSubset(of: libres) { return mitad }
