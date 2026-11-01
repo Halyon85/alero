@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>es</string>
+	<key>CFBundleDisplayName</key>
+	<string>Alero</string>
+	<key>CFBundleExecutable</key>
+	<string>Alero</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>team.halyon.alero</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Alero</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Alero muestra tus próximas reuniones en el notch y te avisa 5 minutos antes. Los eventos no salen de tu Mac.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Alero muestra tus próximas reuniones en el notch y te avisa 5 minutos antes. Los eventos no salen de tu Mac.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Para cambiar el volumen de cada app, Alero recibe el sonido de esa app y lo vuelve a mandar a tu salida más bajo. No se graba ni se guarda nada, y las apps al 100 % no se tocan.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>El teleprompter puede seguir tu voz: reconoce lo que leés para avanzar el guion. Se usa solo mientras está en modo voz.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>El teleprompter en modo voz escucha lo que leés para avanzar el guion. No se graba ni se guarda nada.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Para cortar y pegar archivos con ⌘X y ⌘V, Alero le pregunta a Finder qué archivos elegiste y qué carpeta tenés abierta. Y si al limpiar o desinstalar algo necesita permiso de administrador, se lo pasa a Finder para que lo mande a la Papelera (Finder te pide la contraseña, no Alero).</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Para guardar tus capturas de pantalla, para mover los archivos que cortás con ⌘X y pegás con ⌘V en Finder y para encontrar capturas viejas cuando limpiás la Mac (solo las que elijas van a la Papelera).</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Para guardar tus capturas de pantalla (si elegís esa carpeta) y para mover los archivos que cortás con ⌘X y pegás con ⌘V en Finder.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Para mover los archivos que cortás con ⌘X y pegás con ⌘V en Finder y para encontrar instaladores viejos cuando limpiás la Mac (solo los que elijas van a la Papelera).</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Para mover los archivos que cortás con ⌘X y pegás con ⌘V en Finder.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>Para mover los archivos que cortás con ⌘X y pegás con ⌘V en Finder.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Desarrollado por Halyon Team · Hecho en Argentina</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+</dict>
+</plist>

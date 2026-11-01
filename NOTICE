@@ -1,0 +1,22 @@
+Alero
+Copyright 2026 Halyon Team (https://halyon.team)
+
+Alero was created by Halyon Team, Argentina.
+
+Under section 4(d) of the Apache License 2.0, any redistribution of Alero or of
+software based on it must keep this NOTICE file, and the credit below must appear
+in the place where you show your own notices (for example, an "About" window or
+the documentation):
+
+    Based on Alero by Halyon Team — https://halyon.team
+
+--------------------------------------------------------------------------------
+Alero fue creado por Halyon Team, Argentina. Si redistribuís Alero o un programa
+basado en él, tenés que conservar este archivo NOTICE y el crédito:
+"Basado en Alero, de Halyon Team — https://halyon.team".
+
+Third-party material / Material de terceros:
+- MediaRemote Adapter — https://github.com/ungive/mediaremote-adapter —
+  © 2025 Jonas van den Berg and contributors, BSD 3-Clause License
+  (see Vendor/mediaremote-adapter/LICENSE). Bundled unmodified inside the app to
+  read what is playing; it is not linked into Alero.
