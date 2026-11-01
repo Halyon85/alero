@@ -6,6 +6,7 @@ final class MosaicoTests: XCTestCase {
     // Una pantalla de 1440×900 con la barra de menú (25 pt) y el Dock abajo (75 pt).
     private let pantalla = PantallaCG(marco: CGRect(x: 0, y: 0, width: 1440, height: 900),
                                       visible: CGRect(x: 0, y: 25, width: 1440, height: 800))
+    private let cuatro: [ZonaMosaico] = [.arribaIzquierda, .abajoIzquierda, .arribaDerecha, .abajoDerecha]
 
     func testZonaSegunElPuntero() {
         func zona(_ x: CGFloat, _ y: CGFloat) -> ZonaMosaico? { ReglasMosaico.zona(en: CGPoint(x: x, y: y), pantalla: pantalla)?.zona }
@@ -39,22 +40,25 @@ final class MosaicoTests: XCTestCase {
 
     func testMarcoDeCadaZona() {
         let v = pantalla.visible
-        // Contra los bordes de la pantalla llega justo; en el medio queda un hueco de 10 pt para la barra.
-        XCTAssertEqual(ReglasMosaico.marco(.izquierda, en: v), CGRect(x: 0, y: 25, width: 715, height: 800))
-        XCTAssertEqual(ReglasMosaico.marco(.derecha, en: v), CGRect(x: 725, y: 25, width: 715, height: 800))
+        // Las ventanas quedan pegadas, sin hueco.
+        XCTAssertEqual(ReglasMosaico.marco(.izquierda, en: v), CGRect(x: 0, y: 25, width: 720, height: 800))
+        XCTAssertEqual(ReglasMosaico.marco(.derecha, en: v), CGRect(x: 720, y: 25, width: 720, height: 800))
         XCTAssertEqual(ReglasMosaico.marco(.completa, en: v), v)
-        XCTAssertEqual(ReglasMosaico.marco(.abajoDerecha, en: v), CGRect(x: 725, y: 430, width: 715, height: 395))
+        XCTAssertEqual(ReglasMosaico.marco(.abajoDerecha, en: v), CGRect(x: 720, y: 425, width: 720, height: 400))
         // Con la barra vertical corrida al 30 %: la izquierda angosta, la derecha ancha.
         let d = Divisiones(x: 0.3)
         let izquierda = ReglasMosaico.marco(.izquierda, en: v, divisiones: d)
         let derecha = ReglasMosaico.marco(.derecha, en: v, divisiones: d)
-        XCTAssertEqual(izquierda.width, 427)
-        XCTAssertEqual(derecha.minX - izquierda.maxX, ReglasMosaico.separacion)
+        XCTAssertEqual(izquierda.width, 432)
+        XCTAssertEqual(derecha.minX, izquierda.maxX)
         XCTAssertEqual(derecha.maxX, v.maxX)
-        // Cada columna tiene su barra horizontal.
+        // Con una sola columna partida, cada una tiene su altura.
         let columnas = Divisiones(x: 0.5, yIzquierda: 0.25, yDerecha: 0.75)
-        XCTAssertEqual(ReglasMosaico.marco(.arribaIzquierda, en: v, divisiones: columnas).height, 195)
-        XCTAssertEqual(ReglasMosaico.marco(.arribaDerecha, en: v, divisiones: columnas).height, 595)
+        XCTAssertEqual(ReglasMosaico.marco(.arribaIzquierda, en: v, divisiones: columnas).height, 200)
+        XCTAssertEqual(ReglasMosaico.marco(.arribaDerecha, en: v, divisiones: columnas).height, 600)
+        // Con las dos partidas, la línea es una sola.
+        XCTAssertEqual(ReglasMosaico.unificar(columnas, ocupadas: cuatro).yDerecha, 0.25)
+        XCTAssertEqual(ReglasMosaico.unificar(columnas, ocupadas: [.izquierda, .arribaDerecha, .abajoDerecha]), columnas)
     }
 
     func testLoQueQuedaLibre() {
@@ -83,15 +87,18 @@ final class MosaicoTests: XCTestCase {
         let v = pantalla.visible
         let d = Divisiones()
         XCTAssertEqual(ReglasMosaico.barras(ocupadas: [.izquierda], en: v, divisiones: d), [])
+        // La franja que se agarra va centrada en la unión.
         let dos = ReglasMosaico.barras(ocupadas: [.izquierda, .derecha], en: v, divisiones: d)
-        XCTAssertEqual(dos, [BarraMosaico(tipo: .vertical, franja: CGRect(x: 715, y: 25, width: 10, height: 800))])
+        XCTAssertEqual(dos, [BarraMosaico(tipo: .vertical, franja: CGRect(x: 714, y: 25, width: 12, height: 800))])
         // Mitad izquierda y dos cuartos a la derecha: la vertical y una horizontal solo en la columna derecha.
         let tres = ReglasMosaico.barras(ocupadas: [.izquierda, .arribaDerecha, .abajoDerecha], en: v, divisiones: d)
         XCTAssertEqual(tres.map(\.tipo), [.vertical, .horizontal(.derecha)])
-        XCTAssertEqual(tres[1].franja, CGRect(x: 725, y: 420, width: 715, height: 10))
-        let cuatro = ReglasMosaico.barras(ocupadas: [.arribaIzquierda, .abajoIzquierda, .arribaDerecha, .abajoDerecha],
-                                          en: v, divisiones: d)
-        XCTAssertEqual(cuatro.map(\.tipo), [.vertical, .horizontal(.izquierda), .horizontal(.derecha)])
+        XCTAssertEqual(tres[1].franja, CGRect(x: 720, y: 419, width: 720, height: 12))
+        // Cuatro: la vertical, una sola horizontal de lado a lado y la perilla del cruce.
+        let barras = ReglasMosaico.barras(ocupadas: cuatro, en: v, divisiones: d)
+        XCTAssertEqual(barras.map(\.tipo), [.vertical, .horizontal(nil), .cruce])
+        XCTAssertEqual(barras[1].franja, CGRect(x: 0, y: 419, width: 1440, height: 12))
+        XCTAssertEqual(barras[2].franja, CGRect(x: 705, y: 410, width: 30, height: 30))
     }
 
     func testMoverYCentrarUnaBarra() {
@@ -105,13 +112,28 @@ final class MosaicoTests: XCTestCase {
         XCTAssertEqual(d.yDerecha, 0.25, accuracy: 0.001)
         XCTAssertEqual(d.yIzquierda, 0.5)
         XCTAssertEqual(ReglasMosaico.centrar(d, .vertical).x, 0.5)
+        // El cruce mueve todo en diagonal; centrarlo vuelve todo al medio.
+        let diagonal = ReglasMosaico.mover(Divisiones(), .cruce, hasta: CGPoint(x: 1008, y: 625), en: v)
+        XCTAssertEqual(diagonal.x, 0.7, accuracy: 0.001)
+        XCTAssertEqual(diagonal.yIzquierda, 0.75, accuracy: 0.001)
+        XCTAssertEqual(diagonal.yDerecha, 0.75, accuracy: 0.001)
+        XCTAssertEqual(ReglasMosaico.centrar(diagonal, .cruce), Divisiones())
+    }
+
+    func testCambiarDeLado() {
+        XCTAssertEqual(ReglasMosaico.intercambiar(.izquierda, .vertical), .derecha)
+        XCTAssertEqual(ReglasMosaico.intercambiar(.abajoDerecha, .vertical), .abajoIzquierda)
+        XCTAssertEqual(ReglasMosaico.intercambiar(.arribaDerecha, .horizontal(.derecha)), .abajoDerecha)
+        // La horizontal de una columna no toca la otra.
+        XCTAssertEqual(ReglasMosaico.intercambiar(.arribaIzquierda, .horizontal(.derecha)), .arribaIzquierda)
+        XCTAssertEqual(ReglasMosaico.intercambiar(.arribaIzquierda, .horizontal(nil)), .abajoIzquierda)
     }
 
     func testAgrandarUnaVentanaMueveLaBarra() {
         let v = pantalla.visible
         let ocupadas: [ZonaMosaico] = [.izquierda, .derecha]
-        // La de la izquierda se estiró desde su borde derecho hasta 1005: la barra la sigue (al 70 %).
-        let estirada = CGRect(x: 0, y: 25, width: 1003, height: 800)
+        // La de la izquierda se estiró desde su borde derecho hasta 1008: la barra la sigue (al 70 %).
+        let estirada = CGRect(x: 0, y: 25, width: 1008, height: 800)
         let nuevas = ReglasMosaico.divisiones(siCambio: .izquierda, a: estirada, ocupadas: ocupadas, en: v, divisiones: Divisiones())
         XCTAssertEqual(nuevas?.x ?? 0, 0.7, accuracy: 0.001)
         // Si no se movió el borde de adentro, nada.
@@ -119,9 +141,15 @@ final class MosaicoTests: XCTestCase {
                                               en: v, divisiones: Divisiones()))
         // Un cuarto de arriba que se estiró para abajo mueve la horizontal de su columna.
         let cuartos: [ZonaMosaico] = [.izquierda, .arribaDerecha, .abajoDerecha]
-        let alto = CGRect(x: 725, y: 25, width: 715, height: 595)
+        let alto = CGRect(x: 720, y: 25, width: 720, height: 600)
         let otras = ReglasMosaico.divisiones(siCambio: .arribaDerecha, a: alto, ocupadas: cuartos, en: v, divisiones: Divisiones())
         XCTAssertEqual(otras?.yDerecha ?? 0, 0.75, accuracy: 0.001)
         XCTAssertEqual(otras?.x, 0.5)
+        // Con cuatro, estirar una en diagonal mueve la vertical y la línea de las dos columnas.
+        let esquina = CGRect(x: 0, y: 25, width: 1008, height: 600)
+        let diagonal = ReglasMosaico.divisiones(siCambio: .arribaIzquierda, a: esquina, ocupadas: cuatro, en: v, divisiones: Divisiones())
+        XCTAssertEqual(diagonal?.x ?? 0, 0.7, accuracy: 0.001)
+        XCTAssertEqual(diagonal?.yIzquierda ?? 0, 0.75, accuracy: 0.001)
+        XCTAssertEqual(diagonal?.yDerecha ?? 0, 0.75, accuracy: 0.001)
     }
 }

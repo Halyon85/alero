@@ -4,7 +4,8 @@ import CoreGraphics
 // arrastrar una ventana, qué rectángulo le toca a cada zona según dónde están las barras, qué queda libre, cómo se
 // reacomoda el grupo al sumar una ventana, dónde van las barras y cómo se mueven si agrandás una ventana a mano.
 // Todo en coordenadas de eventos (origen arriba a la izquierda). La pantalla se piensa como una grilla de 2×2: cada
-// zona ocupa una, dos o las cuatro celdas. Entre ventanas queda un hueco (`separacion`) donde va la barra.
+// zona ocupa una, dos o las cuatro celdas. Las ventanas quedan pegadas (`separacion`); la barra va encima de la unión.
+// Con las dos columnas partidas, la línea horizontal es una sola (de lado a lado) y en el cruce hay una perilla.
 
 enum Celda: CaseIterable { case arribaIzquierda, arribaDerecha, abajoIzquierda, abajoDerecha }
 
@@ -62,10 +63,13 @@ struct Divisiones: Equatable {
 
 enum TipoBarra: Hashable {
     case vertical
-    case horizontal(Columna)
+    /// La de una columna, o la de las dos juntas (nil) cuando las dos están partidas.
+    case horizontal(Columna?)
+    /// La perilla del cruce entre la vertical y la horizontal: se mueve en diagonal.
+    case cruce
 }
 
-/// Una barra entre ventanas: el hueco que queda entre ellas (de `ReglasMosaico.separacion` de grueso).
+/// Una barra entre ventanas: la franja que se puede agarrar, centrada en la unión (de `ReglasMosaico.grosorBarra`).
 struct BarraMosaico: Equatable {
     let tipo: TipoBarra
     let franja: CGRect
@@ -108,8 +112,13 @@ enum ReglasMosaico {
     static let bandaCompartida: CGFloat = 40
     /// Qué tan cerca de una esquina (a lo largo del borde) cuenta como esquina en vez de mitad.
     static let esquina: CGFloat = 110
-    /// El hueco entre dos ventanas acomodadas, donde va la barra.
-    static let separacion: CGFloat = 10
+    /// El hueco entre dos ventanas acomodadas: ninguno, quedan pegadas.
+    static let separacion: CGFloat = 0
+    /// Lo ancho de la franja que se agarra sobre la unión: tapa también los bordes con que macOS agranda cada
+    /// ventana, así el clic lo toma la barra y no la ventana.
+    static let grosorBarra: CGFloat = 12
+    /// El lado de la perilla del cruce.
+    static let tamanoCruce: CGFloat = 30
     /// Las barras no se corren más allá de esto: ninguna ventana queda más angosta que el 15 % de la pantalla.
     static let limite: ClosedRange<CGFloat> = 0.15...0.85
 
@@ -192,49 +201,104 @@ enum ReglasMosaico {
         }
     }
 
-    /// Las barras entre las ventanas de un grupo: una vertical si hay ventanas a los dos lados, y una horizontal en
-    /// cada columna que tiene una ventana arriba y otra abajo.
+    /// Las barras entre las ventanas de un grupo: una vertical si hay ventanas a los dos lados; una horizontal en
+    /// cada columna que tiene una ventana arriba y otra abajo (una sola de lado a lado si son las dos, con la
+    /// perilla del cruce).
     static func barras(ocupadas: [ZonaMosaico], en v: CGRect, divisiones d: Divisiones) -> [BarraMosaico] {
         guard !ocupadas.contains(.completa) else { return [] }
+        let medio = grosorBarra / 2
         let columnas = Set(ocupadas.compactMap(\.columna))
+        let corteX = (v.minX + v.width * d.x).rounded()
         var barras: [BarraMosaico] = []
-        if columnas.count == 2 {
-            let corteX = (v.minX + v.width * d.x).rounded()
-            barras.append(BarraMosaico(tipo: .vertical,
-                                       franja: CGRect(x: corteX - separacion / 2, y: v.minY, width: separacion, height: v.height)))
+        let vertical = columnas.count == 2
+        if vertical {
+            barras.append(BarraMosaico(tipo: .vertical, franja: CGRect(x: corteX - medio, y: v.minY, width: grosorBarra, height: v.height)))
         }
-        for columna in [Columna.izquierda, .derecha] {
-            let arriba: ZonaMosaico = columna == .izquierda ? .arribaIzquierda : .arribaDerecha
-            let abajo: ZonaMosaico = columna == .izquierda ? .abajoIzquierda : .abajoDerecha
-            guard ocupadas.contains(arriba) && ocupadas.contains(abajo) else { continue }
-            let col = marco(.mitad(columna), en: v, divisiones: d)
-            let corteY = (v.minY + v.height * d.y(columna)).rounded()
-            barras.append(BarraMosaico(tipo: .horizontal(columna),
-                                       franja: CGRect(x: col.minX, y: corteY - separacion / 2, width: col.width, height: separacion)))
+        let partidas = [Columna.izquierda, .derecha].filter { partida($0, ocupadas) }
+        if partidas.count == 2 {
+            let corteY = (v.minY + v.height * d.yIzquierda).rounded()
+            barras.append(BarraMosaico(tipo: .horizontal(nil), franja: CGRect(x: v.minX, y: corteY - medio, width: v.width, height: grosorBarra)))
+            barras.append(BarraMosaico(tipo: .cruce, franja: CGRect(x: corteX - tamanoCruce / 2, y: corteY - tamanoCruce / 2,
+                                                                   width: tamanoCruce, height: tamanoCruce)))
+        } else {
+            for columna in partidas {
+                let col = marco(.mitad(columna), en: v, divisiones: d)
+                let corteY = (v.minY + v.height * d.y(columna)).rounded()
+                barras.append(BarraMosaico(tipo: .horizontal(columna),
+                                           franja: CGRect(x: col.minX, y: corteY - medio, width: col.width, height: grosorBarra)))
+            }
         }
         return barras
+    }
+
+    /// Si una columna tiene una ventana arriba y otra abajo.
+    static func partida(_ columna: Columna, _ ocupadas: [ZonaMosaico]) -> Bool {
+        columna == .izquierda ? ocupadas.contains(.arribaIzquierda) && ocupadas.contains(.abajoIzquierda)
+                              : ocupadas.contains(.arribaDerecha) && ocupadas.contains(.abajoDerecha)
+    }
+
+    /// Con las dos columnas partidas la línea horizontal es una sola: las dos alturas pasan a ser la de la izquierda.
+    static func unificar(_ d: Divisiones, ocupadas: [ZonaMosaico]) -> Divisiones {
+        guard partida(.izquierda, ocupadas) && partida(.derecha, ocupadas) else { return d }
+        var nuevas = d
+        nuevas.yDerecha = d.yIzquierda
+        return nuevas
     }
 
     /// Las divisiones con una barra llevada hasta `p` (sin pasarse de `limite`).
     static func mover(_ d: Divisiones, _ tipo: TipoBarra, hasta p: CGPoint, en v: CGRect) -> Divisiones {
         var nuevas = d
+        let x = limitar((p.x - v.minX) / v.width)
+        let y = limitar((p.y - v.minY) / v.height)
         switch tipo {
-        case .vertical: nuevas.x = limitar((p.x - v.minX) / v.width)
-        case .horizontal(.izquierda): nuevas.yIzquierda = limitar((p.y - v.minY) / v.height)
-        case .horizontal(.derecha): nuevas.yDerecha = limitar((p.y - v.minY) / v.height)
+        case .vertical: nuevas.x = x
+        case .horizontal(.izquierda): nuevas.yIzquierda = y
+        case .horizontal(.derecha): nuevas.yDerecha = y
+        case .horizontal(nil): nuevas.yIzquierda = y; nuevas.yDerecha = y
+        case .cruce: nuevas.x = x; nuevas.yIzquierda = y; nuevas.yDerecha = y
         }
         return nuevas
     }
 
-    /// Las divisiones con una barra otra vez al medio (doble clic en la barra).
+    /// Las divisiones con una barra otra vez al medio (doble clic o "Al medio").
     static func centrar(_ d: Divisiones, _ tipo: TipoBarra) -> Divisiones {
         var nuevas = d
         switch tipo {
         case .vertical: nuevas.x = 0.5
         case .horizontal(.izquierda): nuevas.yIzquierda = 0.5
         case .horizontal(.derecha): nuevas.yDerecha = 0.5
+        case .horizontal(nil): nuevas.yIzquierda = 0.5; nuevas.yDerecha = 0.5
+        case .cruce: nuevas = Divisiones()
         }
         return nuevas
+    }
+
+    /// "Cambiar" en una barra: las ventanas de un lado pasan al otro (izquierda ↔ derecha en la vertical; arriba ↔
+    /// abajo en una horizontal, en su columna o en las dos). En el cruce no hay cambio.
+    static func intercambiar(_ zona: ZonaMosaico, _ tipo: TipoBarra) -> ZonaMosaico {
+        switch tipo {
+        case .vertical:
+            switch zona {
+            case .izquierda: return .derecha
+            case .derecha: return .izquierda
+            case .arribaIzquierda: return .arribaDerecha
+            case .arribaDerecha: return .arribaIzquierda
+            case .abajoIzquierda: return .abajoDerecha
+            case .abajoDerecha: return .abajoIzquierda
+            case .completa: return .completa
+            }
+        case .horizontal(let columna):
+            guard columna == nil || zona.columna == columna else { return zona }
+            switch zona {
+            case .arribaIzquierda: return .abajoIzquierda
+            case .abajoIzquierda: return .arribaIzquierda
+            case .arribaDerecha: return .abajoDerecha
+            case .abajoDerecha: return .arribaDerecha
+            default: return zona
+            }
+        case .cruce:
+            return zona
+        }
     }
 
     /// Si una ventana del grupo se agrandó o se achicó desde un borde de adentro (el que da a otra ventana, a mano o
@@ -246,17 +310,25 @@ enum ReglasMosaico {
         let esperado = marco(zona, en: v, divisiones: d)
         let medio = separacion / 2
         let tipos = Set(barras(ocupadas: ocupadas, en: v, divisiones: d).map(\.tipo))
+        let lineaUnica = tipos.contains(.horizontal(nil))
         var nuevas = d
         if tipos.contains(.vertical) {
             if columna == .izquierda, abs(r.maxX - esperado.maxX) > 4 { nuevas.x = limitar((r.maxX + medio - v.minX) / v.width) }
             if columna == .derecha, abs(r.minX - esperado.minX) > 4 { nuevas.x = limitar((r.minX - medio - v.minX) / v.width) }
         }
-        if zona.esCuarto, tipos.contains(.horizontal(columna)) {
+        if zona.esCuarto, tipos.contains(.horizontal(columna)) || lineaUnica {
             let borde = zona.deArriba ? r.maxY + medio : r.minY - medio
             let antes = zona.deArriba ? esperado.maxY : esperado.minY
             if abs((zona.deArriba ? r.maxY : r.minY) - antes) > 4 {
                 let y = limitar((borde - v.minY) / v.height)
-                if columna == .izquierda { nuevas.yIzquierda = y } else { nuevas.yDerecha = y }
+                if lineaUnica {
+                    nuevas.yIzquierda = y
+                    nuevas.yDerecha = y
+                } else if columna == .izquierda {
+                    nuevas.yIzquierda = y
+                } else {
+                    nuevas.yDerecha = y
+                }
             }
         }
         return nuevas == d ? nil : nuevas
