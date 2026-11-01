@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 
 // Herramientas › Ventanas: la llave de "Acomodar ventanas" (`Mosaico`), cómo se usa y, si macOS 15 también acomoda
-// ventanas al arrastrarlas a los bordes, un aviso para apagar el de macOS (los dos a la vez se pisan).
+// ventanas al arrastrarlas a los costados o a la barra de menús, un aviso para apagar lo de macOS (los dos a la vez
+// se pisan). Los nombres del aviso son los de Ajustes del Sistema › Escritorio y Dock › Ventanas, tal cual.
 
 struct PaginaVentanas: View {
     @ObservedObject private var ajustes = Ajustes.shared
@@ -22,8 +23,8 @@ struct PaginaVentanas: View {
         }
         if ajustes.mosaico && deMacOS {
             AvisoTarjeta(tono: .info, titulo: T("macOS también acomoda ventanas", "macOS arranges windows too"),
-                         detalle: T("Para que no se pisen, apagá «Arrastrar ventanas a los bordes de la pantalla para acomodarlas» en Ajustes del Sistema › Escritorio y Dock.",
-                                    "So they don't clash, turn off “Drag windows to screen edges to tile” in System Settings › Desktop & Dock.")) {
+                         detalle: T("Para que no se pisen, en Ajustes del Sistema › Escritorio y Dock › Ventanas apagá «Arrastrar ventanas al borde izquierdo o derecho de la pantalla para disponerlas en mosaico» y «Arrastrar ventanas a la barra de menús para llenar la pantalla».",
+                                    "So they don't clash, in System Settings › Desktop & Dock › Windows turn off “Drag windows to left or right edge of screen to tile” and “Drag windows to menu bar to fill screen”.")) {
                 BotonSecundario(texto: T("Abrir Escritorio y Dock", "Open Desktop & Dock")) { MosaicoDeMacOS.abrirAjustes() }
             }
         }
@@ -32,7 +33,8 @@ struct PaginaVentanas: View {
                  icono: "rectangle.lefthalf.filled")
             paso(T("A una esquina", "To a corner"), T("Ocupa un cuarto: entran hasta cuatro apps.", "It takes a quarter: up to four apps fit."),
                  icono: "rectangle.split.2x2")
-            paso(T("Arriba", "To the top"), T("Ocupa toda la pantalla, sin pasar a pantalla completa.", "It fills the screen, without going full screen."),
+            paso(T("Arriba, contra la barra de menús", "Up against the menu bar"),
+                 T("Ocupa toda la pantalla, sin pasar a pantalla completa.", "It fills the screen, without going full screen."),
                  icono: "rectangle.inset.filled")
             paso(T("El lugar que queda", "The spot that's left"),
                  T("Alero te muestra las otras apps abiertas: tocás una y va ahí.", "Alero shows your other open apps: click one and it goes there."),
@@ -52,13 +54,17 @@ struct PaginaVentanas: View {
     }
 }
 
-/// El acomodo de ventanas propio de macOS 15 y más nuevos (arrastrarlas a los bordes), prendido de fábrica.
+/// El acomodo de ventanas propio de macOS 15 y más nuevos, prendido de fábrica: arrastrarlas a los costados
+/// (`EnableTilingByEdgeDrag`) o a la barra de menús (`EnableTopTilingByEdgeDrag`). El de mantener ⌥ no se pisa con
+/// Alero y no cuenta.
 enum MosaicoDeMacOS {
     static var prendido: Bool {
         guard #available(macOS 15, *) else { return false }
         let dominio = "com.apple.WindowManager" as CFString
         CFPreferencesAppSynchronize(dominio)
-        return CFPreferencesCopyAppValue("EnableTilingByEdgeDrag" as CFString, dominio) as? Bool ?? true
+        return ["EnableTilingByEdgeDrag", "EnableTopTilingByEdgeDrag"].contains { clave in
+            CFPreferencesCopyAppValue(clave as CFString, dominio) as? Bool ?? true
+        }
     }
 
     static func abrirAjustes() {
