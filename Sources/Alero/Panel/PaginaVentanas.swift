@@ -37,12 +37,24 @@ struct PaginaVentanas: View {
                  T("Ocupa toda la pantalla, sin pasar a pantalla completa.", "It fills the screen, without going full screen."),
                  icono: "rectangle.inset.filled")
             paso(T("El lugar que queda", "The spot that's left"),
-                 T("Alero te muestra las otras apps abiertas: tocás una y va ahí.", "Alero shows your other open apps: click one and it goes there."),
+                 T("Aparecen todas tus apps abiertas y un buscador para abrir otra: tocás una y va ahí. Con la X o Esc, la ventana vuelve a como estaba.",
+                   "All your open apps show up, plus a search to open another: click one and it goes there. With the X or Esc, the window goes back to how it was."),
                  icono: "square.grid.2x2")
+            paso(T("Una app más", "One more app"),
+                 T("Con la pantalla en dos mitades, llevá la tercera a una esquina: la de ese lado pasa al otro cuarto.",
+                   "With the screen split in halves, drag the third one to a corner: the one on that side moves to the other quarter."),
+                 icono: "rectangle.split.1x2")
             paso(T("La barra del medio", "The middle bar"),
-                 T("Pasá el mouse por la unión entre dos ventanas y arrastrá la barra: cambian de tamaño juntas.",
-                   "Hover over the seam between two windows and drag the bar: they resize together."),
-                 icono: "arrow.left.and.right", divisor: false)
+                 T("Entre las ventanas queda una barra: arrastrala para agrandar una y achicar la otra; doble clic la centra. Si estirás una ventana desde su borde, las demás la siguen.",
+                   "A bar sits between the windows: drag it to grow one and shrink the other; double-click centers it. If you stretch a window from its edge, the others follow."),
+                 icono: "arrow.left.and.right")
+            paso(T("Sacar una ventana", "Take a window out"),
+                 T("Arrastrala afuera por su barra de arriba y vuelve a su tamaño de antes.", "Drag it out by its title bar and it goes back to its earlier size."),
+                 icono: "arrow.uturn.backward")
+            paso(T("Con dos monitores", "With two displays"),
+                 T("Del lado donde la pantalla sigue en el otro monitor, quedate un momento cerca del borde.",
+                   "On the side where the screen continues onto the other display, hold near the edge for a moment."),
+                 icono: "display.2", divisor: false)
         }
         .onReceive(reloj) { _ in deMacOS = MosaicoDeMacOS.prendido }
     }
