@@ -5,17 +5,25 @@
 # ALERO_SIN_MUSICA=1 saltea el adaptador de música (la app anda igual, sin reproductor en el notch).
 # ALERO_FIRMA=- firma local (la que se usa para publicar: el certificado "Apple Development" lleva tu correo y es para
 # probar en tus Macs, no para repartir). ALERO_FIRMA="Developer ID Application: …" firma con esa identidad.
+# ALERO_INFO=<archivo> usa ese Info.plist en vez de Recursos/Info.plist: `herramientas/publicar-version.sh` pasa uno con
+# la versión, la lista de versiones y la clave de Sparkle (solo esas copias buscan actualizaciones, ver docs/PUBLICAR.md).
 set -euo pipefail
 cd "$(dirname "$0")"
 
 swift build -c release --arch arm64
-BIN="$(swift build -c release --arch arm64 --show-bin-path)/Alero"
+CARPETA_BIN="$(swift build -c release --arch arm64 --show-bin-path)"
+BIN="$CARPETA_BIN/Alero"
 APP="build/Alero.app"
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 cp "$BIN" "$APP/Contents/MacOS/Alero"
-cp Recursos/Info.plist "$APP/Contents/Info.plist"
+cp "${ALERO_INFO:-Recursos/Info.plist}" "$APP/Contents/Info.plist"
+# Sparkle (actualizaciones): va en Frameworks y el ejecutable la busca ahí. Alero no usa la caja de arena de macOS,
+# así que los servicios XPC de Sparkle no hacen falta (son para apps en caja de arena) y se sacan.
+ditto "$CARPETA_BIN/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
+rm -rf "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices" "$APP/Contents/Frameworks/Sparkle.framework/XPCServices"
+install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/Alero"
 [[ -f Recursos/AppIcon.icns ]] && cp Recursos/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp LICENSE NOTICE "$APP/Contents/Resources/"
 strip -x "$APP/Contents/MacOS/Alero" 2>/dev/null || true
@@ -34,8 +42,21 @@ if [[ -z "${ALERO_SIN_MUSICA:-}" ]]; then
   codesign --force --timestamp=none --sign "${IDENTIDAD:--}" "$APP/Contents/Resources/MediaRemoteAdapter.framework"
 fi
 
+# Lo de adentro de Sparkle (de adentro hacia afuera) con la misma firma que la app.
+SPARKLE="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
+for pieza in "$SPARKLE/Autoupdate" "$SPARKLE/Updater.app" "$APP/Contents/Frameworks/Sparkle.framework"; do
+  codesign --force --options runtime --timestamp=none --sign "${IDENTIDAD:--}" "$pieza"
+done
+# Con la firma local macOS solo deja cargar bibliotecas del mismo equipo de Apple, y la firma local no tiene equipo:
+# sin este permiso Alero no arranca porque no puede abrir Sparkle. Con un certificado de Apple no hace falta.
+PERMISOS=Recursos/Alero.entitlements
+if [[ -z "$IDENTIDAD" ]]; then
+  PERMISOS=build/Alero-firma-local.entitlements
+  cp Recursos/Alero.entitlements "$PERMISOS"
+  /usr/libexec/PlistBuddy -c "Add :com.apple.security.cs.disable-library-validation bool true" "$PERMISOS"
+fi
 codesign --force --options runtime --timestamp=none \
-  --entitlements Recursos/Alero.entitlements \
+  --entitlements "$PERMISOS" \
   --sign "${IDENTIDAD:--}" "$APP"
 echo "Firmada con: ${IDENTIDAD:-firma local (ad-hoc)}"
 du -sh "$APP"

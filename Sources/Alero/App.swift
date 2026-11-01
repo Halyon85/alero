@@ -50,6 +50,7 @@ final class Delegado: NSObject, NSApplicationDelegate {
         BotonesMouse.shared.arrancar()
         CortarPegar.shared.arrancar()
         Capturador.shared.arrancar()
+        Actualizaciones.arrancar()
         if !UserDefaults.standard.bool(forKey: "app.yaAbrio") {
             UserDefaults.standard.set(true, forKey: "app.yaAbrio")
             VentanaAlero.shared.mostrar()

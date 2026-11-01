@@ -3,7 +3,8 @@ import ServiceManagement
 import SwiftUI
 
 // Alero › General: abrir al iniciar sesión, mostrar o esconder el ícono de la barra de menú, estado de los permisos
-// (Accesibilidad, Grabación de pantalla, Finder y Calendario) y versión.
+// (Accesibilidad, Grabación de pantalla, Finder y Calendario), versión y, en las versiones publicadas, buscar
+// actualizaciones (`Actualizaciones`).
 
 struct PaginaGeneral: View {
     @ObservedObject private var calendario = Calendario.shared
@@ -51,8 +52,15 @@ struct PaginaGeneral: View {
         }
         Tarjeta(titulo: T("Acerca de", "About")) {
             Fila(titulo: "Alero \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")",
-                 detalle: T("Código abierto, licencia Apache 2.0.", "Open source, Apache 2.0 license."), divisor: false) {
+                 detalle: T("Código abierto, licencia Apache 2.0.", "Open source, Apache 2.0 license."), divisor: Actualizaciones.disponibles) {
                 EmptyView()
+            }
+            if Actualizaciones.disponibles {
+                Fila(titulo: T("Actualizaciones", "Updates"),
+                     detalle: T("Alero busca una versión nueva una vez por día y te pregunta antes de instalarla.",
+                                "Alero looks for a new version once a day and asks you before installing it."), divisor: false) {
+                    BotonSecundario(texto: T("Buscar ahora", "Check Now"), icono: "arrow.triangle.2.circlepath") { Actualizaciones.buscar() }
+                }
             }
         }
         .onReceive(reloj) { _ in
