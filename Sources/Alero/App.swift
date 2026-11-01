@@ -47,6 +47,7 @@ final class Delegado: NSObject, NSApplicationDelegate {
         Monitores.shared.arrancar()
         ClicDock.shared.arrancar()
         BotonVerde.shared.arrancar()
+        Mosaico.shared.arrancar()
         BotonesMouse.shared.arrancar()
         CortarPegar.shared.arrancar()
         Capturador.shared.arrancar()

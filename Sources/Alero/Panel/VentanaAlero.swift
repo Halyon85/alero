@@ -25,7 +25,7 @@ enum GrupoSeccion: Hashable {
 
 enum SeccionAlero: String, SeccionLateral {
     case notch, notchAbierto, sonido
-    case mouse, capturas, teleprompter, cafe
+    case mouse, ventanas, capturas, teleprompter, cafe
     case limpiador, desinstalador, homebrew, teclado
     case general
     var id: String { rawValue }
@@ -33,7 +33,7 @@ enum SeccionAlero: String, SeccionLateral {
     var grupo: GrupoSeccion {
         switch self {
         case .notch, .notchAbierto, .sonido: return .notch
-        case .mouse, .capturas, .teleprompter, .cafe: return .herramientas
+        case .mouse, .ventanas, .capturas, .teleprompter, .cafe: return .herramientas
         case .limpiador, .desinstalador, .homebrew, .teclado: return .mantenimiento
         case .general: return .alero
         }
@@ -45,6 +45,7 @@ enum SeccionAlero: String, SeccionLateral {
         case .notchAbierto: return T("Notch abierto", "Open notch")
         case .sonido: return T("Sonido y brillo", "Sound & brightness")
         case .mouse: return T("Mouse y teclado", "Mouse & keyboard")
+        case .ventanas: return T("Ventanas", "Windows")
         case .capturas: return T("Capturas", "Screenshots")
         case .teleprompter: return T("Teleprompter", "Teleprompter")
         case .cafe: return T("Café", "Coffee")
@@ -62,6 +63,7 @@ enum SeccionAlero: String, SeccionLateral {
         case .notchAbierto: return "rectangle.inset.filled.and.person.filled"
         case .sonido: return "speaker.wave.2"
         case .mouse: return "computermouse"
+        case .ventanas: return "rectangle.split.2x2"
         case .capturas: return "camera.viewfinder"
         case .teleprompter: return "text.alignleft"
         case .cafe: return "cup.and.saucer"
@@ -166,6 +168,7 @@ struct PanelAlero: View {
             case .notchAbierto: PaginaNotchAbierto()
             case .sonido: PaginaSonido()
             case .mouse: PaginaMouse()
+            case .ventanas: PaginaVentanas()
             case .capturas: PaginaCapturas()
             case .teleprompter: PaginaTeleprompter()
             case .cafe: PaginaCafe()
