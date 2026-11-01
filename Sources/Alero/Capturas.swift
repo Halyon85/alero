@@ -39,6 +39,9 @@ enum Capturas {
                                codex: EstadoAgente(ultimo: Date().addingTimeInterval(-720), proyecto: "halyon",
                                                    cupos: [.init(nombre: "semana", usado: 0.47, reinicia: Date().addingTimeInterval(3 * 86_400))],
                                                    chat: .init(modelo: "gpt-5.2-codex", contexto: 38_816, ventana: 258_400)))
+        Teleprompter.shared.simular(T(
+            "Hola a todos. Hoy les quiero mostrar algo que hicimos para que el notch de la Mac trabaje para vos.\n\nEl guion queda justo debajo de la cámara, así mirás a la gente y no a tus notas.",
+            "Hi everyone. Today I want to show you something we made so your Mac's notch works for you.\n\nThe script sits right under the camera, so you look at people and not at your notes."))
         let estados: [(String, () -> Void)] = [
             ("1-cerrado-musica", { estado.forzar(.cerrado) }),
             ("2-aviso-reunion", { estado.forzar(.aviso, aviso: .reunion(titulo: "Llamada con cliente", minutos: 5)) }),

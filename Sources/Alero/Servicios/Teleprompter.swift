@@ -12,7 +12,7 @@ final class Teleprompter: ObservableObject {
     /// El guion. Se guarda al cambiar.
     @Published var texto: String {
         didSet {
-            UserDefaults.standard.set(texto, forKey: "prompter.texto")
+            if !simulado { UserDefaults.standard.set(texto, forKey: "prompter.texto") }
             palabrasCache = nil
         }
     }
@@ -31,6 +31,8 @@ final class Teleprompter: ObservableObject {
     var altoTexto: Double = 0
     var limite: Double { max(altoTexto - 40, 0) }
     private var cuentaPendiente: DispatchWorkItem?
+    /// En `--capturas` el guion es de ejemplo y no se guarda (no pisa el de la persona).
+    private var simulado = false
     /// Se crea recién la primera vez que se usa el modo voz (el motor de audio no se arma si nunca se usa).
     private var seguidor: SeguidorVoz?
     private var palabrasCache: (normales: [String], rangos: [Range<String.Index>])?
@@ -158,6 +160,12 @@ final class Teleprompter: ObservableObject {
         pausar()
         aviso = nil
         Ajustes.shared.prompterVoz.toggle()
+    }
+
+    /// Solo para `--capturas`: un guion de ejemplo que no se guarda.
+    func simular(_ ejemplo: String) {
+        simulado = true
+        texto = ejemplo
     }
 
     /// Cambia la velocidad sin saltar: lo recorrido hasta ahora queda como punto de partida.
