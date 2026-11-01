@@ -1,11 +1,18 @@
 import AppKit
 
 // Los dos logos de Alero, dibujados en código (nítidos en cualquier tamaño y sin archivos):
-// - el de la app: un mosaico claro con el "alero" negro arriba (el notch con sus hombros) y la luz celeste;
+// - el de la app: la noche con el "alero" negro arriba (el notch con sus hombros), la luz celeste que cae de él y
+//   unas estrellas;
 // - el de la barra de menú: una pantalla con su notch, en plantilla (macOS la pinta blanca o negra).
 // `Alero --icono <archivo.png>` guarda el de la app en 1024 px para armar AppIcon.icns.
 
 enum IconoApp {
+    /// Estrellas del logo en la grilla de 1024 px: x, y, radio y brillo (las de la zona de la luz no van).
+    private static let estrellas: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [
+        (190, 470, 5, 0.9), (800, 590, 3.5, 0.6), (250, 760, 3, 0.45), (470, 800, 4, 0.55), (760, 760, 3, 0.4),
+        (860, 420, 3, 0.5), (620, 560, 2.5, 0.4), (150, 640, 2.5, 0.4),
+    ]
+
     static func imagen(lado: CGFloat) -> NSImage {
         NSImage(size: NSSize(width: lado, height: lado), flipped: true) { _ in
             let s = lado / 1024
@@ -18,15 +25,30 @@ enum IconoApp {
             sombra.shadowBlurRadius = 24 * s
             sombra.shadowOffset = NSSize(width: 0, height: -10 * s)
             sombra.set()
-            NSColor(hex: 0xF7F4F1).setFill()
+            NSColor(hex: 0x0A0F24).setFill()
             mosaico.fill()
             NSGraphicsContext.restoreGraphicsState()
 
             NSGraphicsContext.saveGraphicsState()
             mosaico.addClip()
-            NSGradient(starting: NSColor(hex: 0xFFFFFF), ending: NSColor(hex: 0xE8E2DC))?.draw(in: mosaico, angle: 90)
-            // El alero: cuerpo negro con hombros cóncavos arriba, pegado al borde superior del mosaico.
-            alero(en: NSRect(x: 230 * s, y: 100 * s, width: 564 * s, height: 250 * s), hombro: 52 * s, esquina: 110 * s).fill(con: .black)
+            // La noche: azul profundo, un poco más claro arriba para que el alero se despegue.
+            NSGradient(colors: [NSColor(hex: 0x0A0F24), NSColor(hex: 0x111A3D), NSColor(hex: 0x1D2B5E)])?.draw(in: mosaico, angle: -90)
+            // La luz celeste que cae del alero, como la lámpara de un porche.
+            let centroLuz = NSPoint(x: 512 * s, y: 330 * s)
+            NSGradient(colors: [NSColor(hex: 0x8FD8FF).withAlphaComponent(0.42), NSColor(hex: 0x8FD8FF).withAlphaComponent(0)])?
+                .draw(fromCenter: centroLuz, radius: 0, toCenter: centroLuz, radius: 430 * s, options: [])
+            // Estrellas, fuera de la luz.
+            for (x, y, r, brillo) in estrellas {
+                NSColor(white: 1, alpha: brillo).setFill()
+                NSBezierPath(ovalIn: NSRect(x: (x - r) * s, y: (y - r) * s, width: r * 2 * s, height: r * 2 * s)).fill()
+            }
+            // El alero: cuerpo negro con hombros cóncavos arriba, pegado al borde superior del mosaico, con un borde fino
+            // para que no se pierda en la noche.
+            let forma = alero(en: NSRect(x: 230 * s, y: 100 * s, width: 564 * s, height: 250 * s), hombro: 52 * s, esquina: 110 * s)
+            forma.fill(con: .black)
+            NSColor(white: 1, alpha: 0.14).setStroke()
+            forma.lineWidth = 4 * s
+            forma.stroke()
             // La luz: la "isla" viva.
             NSColor(hex: 0x8FD8FF).setFill()
             NSBezierPath(ovalIn: NSRect(x: 640 * s, y: 196 * s, width: 64 * s, height: 64 * s)).fill()
