@@ -862,7 +862,7 @@ struct VentanaVisible: Identifiable, Equatable {
 /// La lista de ventanas del servidor de ventanas (sin Accesibilidad: es barata). Cualquier hilo.
 enum VentanasVisibles {
     /// Las ventanas comunes a la vista en este escritorio, de adelante hacia atrás, sin las de Alero ni del Dock.
-    /// Solo las que tocan alguna pantalla: hay apps que guardan una ventana escondida lejos (Dixity, en -20000).
+    /// Solo las que tocan alguna pantalla: hay apps que guardan una ventana escondida lejos (por ejemplo, en -20000).
     static func todas() -> [VentanaVisible] {
         let pantallas = Pantallas.shared.actuales
         return lista().compactMap { comun($0) }.filter { v in pantallas.contains { $0.marco.intersects(v.marco) } }
