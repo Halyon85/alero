@@ -6,7 +6,7 @@
 Una app nativa para la barra de menú y el notch: música, agenda, volumen por app, brillo de las pantallas,
 teleprompter, capturas, limpieza y desinstalador. Liviana, privada y de código abierto.</p>
 
-<p align="center">🌎 <b><a href="README.md">Read in English</a></b></p>
+<p align="center"><a href="https://alero.halyon.app/es/">Sitio</a> · <a href="https://github.com/Halyon85/alero/releases/latest">Descargar</a> · 🌎 <b><a href="README.md">Read in English</a></b></p>
 
 ---
 
@@ -57,6 +57,19 @@ Cada función se puede apagar y, apagada, no hace nada de fondo. En reposo: unos
 - Para compilar: las herramientas de línea de comandos de Xcode (`xcode-select --install`) y `cmake`
   (`brew install cmake`, para el lector de música).
 
+## Descargar
+
+Bajá el último `Alero-x.y.z.zip` de [Releases](https://github.com/Halyon85/alero/releases/latest), descomprimilo y
+arrastrá `Alero.app` a Aplicaciones.
+
+> ⚠️ **Instalala bajo tu responsabilidad.** Alero es software libre y gratuito, sin ninguna garantía (ver la
+> [licencia](LICENSE)). Todavía no está firmada con un Developer ID de Apple, así que la primera vez macOS la bloquea:
+> abrí **Ajustes del Sistema → Privacidad y seguridad**, bajá hasta el final y tocá **Abrir igual** al lado de Alero. Se
+> hace una sola vez. Algunas funciones usan partes de macOS que Apple no documenta (luz del teclado, brillo de la
+> pantalla integrada, lo que está sonando): si una actualización de macOS las cambia, esas funciones se apagan solas.
+
+Si preferís no confiar en una descarga, compilala vos desde este código: tarda un minuto.
+
 ## Compilar e instalar
 
 ```bash
@@ -68,10 +81,6 @@ swift test               # pruebas (no piden permisos ni tocan tus archivos)
 
 No hace falta una cuenta de desarrollador de Apple: `compilar.sh` firma con tu certificado «Apple Development» si lo
 tenés y, si no, con una firma local. `ALERO_SIN_MUSICA=1 ./compilar.sh` arma la app sin el lector de música.
-
-> ⚠️ **Usala bajo tu responsabilidad.** Alero es software libre y gratuito, sin ninguna garantía (ver la
-> [licencia](LICENSE)). Algunas funciones usan partes de macOS que Apple no documenta (luz del teclado, brillo de la
-> pantalla integrada, lo que está sonando): si una actualización de macOS las cambia, esas funciones se apagan solas.
 
 ## Permisos
 

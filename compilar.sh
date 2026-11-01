@@ -3,6 +3,8 @@
 # Uso: ./compilar.sh            → deja la app en build/Alero.app
 #      ./compilar.sh instalar   → además la copia a /Applications/Alero.app y la abre
 # ALERO_SIN_MUSICA=1 saltea el adaptador de música (la app anda igual, sin reproductor en el notch).
+# ALERO_FIRMA=- firma local (la que se usa para publicar: el certificado "Apple Development" lleva tu correo y es para
+# probar en tus Macs, no para repartir). ALERO_FIRMA="Developer ID Application: …" firma con esa identidad.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -21,7 +23,8 @@ strip -x "$APP/Contents/MacOS/Alero" 2>/dev/null || true
 # Música: desde macOS 15.4 solo los programas de Apple pueden leer "lo que está sonando". El adaptador
 # (BSD-3, Vendor/mediaremote-adapter) carga un framework chiquito dentro de /usr/bin/perl, que sí puede, y le pasa
 # los datos a Alero en JSON. Se compila desde su código y no se enlaza con Alero: solo viaja en Resources.
-IDENTIDAD=$(security find-identity -v -p codesigning | awk -F'"' '/Apple Development/ {print $2; exit}')
+IDENTIDAD=${ALERO_FIRMA:-$(security find-identity -v -p codesigning | awk -F'"' '/Apple Development/ {print $2; exit}')}
+[[ "$IDENTIDAD" == "-" ]] && IDENTIDAD=
 if [[ -z "${ALERO_SIN_MUSICA:-}" ]]; then
   cmake -S Vendor/mediaremote-adapter -B build/mra -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 >/dev/null
   cmake --build build/mra --config Release --target MediaRemoteAdapter >/dev/null

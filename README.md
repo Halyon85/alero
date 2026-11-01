@@ -6,7 +6,7 @@
 A native macOS app for the menu bar and the notch: music, calendar, per-app volume, display brightness, a teleprompter,
 screenshots, cleanup and uninstall tools — light, private and open source.</p>
 
-<p align="center">🇦🇷 <b><a href="LEEME.md">Leer en español</a></b></p>
+<p align="center"><a href="https://alero.halyon.app">Website</a> · <a href="https://github.com/Halyon85/alero/releases/latest">Download</a> · 🇦🇷 <b><a href="LEEME.md">Leer en español</a></b></p>
 
 ---
 
@@ -56,6 +56,19 @@ Every feature can be turned off and, when off, does nothing in the background. I
 - macOS 14 or later, Apple Silicon.
 - To build: the Xcode Command Line Tools (`xcode-select --install`) and `cmake` (`brew install cmake`, for the music reader).
 
+## Download
+
+Get the latest `Alero-x.y.z.zip` from [Releases](https://github.com/Halyon85/alero/releases/latest), unzip it and drag
+`Alero.app` to Applications.
+
+> ⚠️ **Install at your own risk.** Alero is free, open source software without any warranty (see the [license](LICENSE)).
+> It isn't signed with an Apple Developer ID yet, so the first time macOS blocks it: open **System Settings → Privacy &
+> Security**, scroll down and click **Open Anyway** next to Alero. You only do this once. Some features use parts of
+> macOS that Apple doesn't document (keyboard light, built-in display brightness, what's playing); if a macOS update
+> changes them, those features turn themselves off.
+
+If you'd rather not trust a download, build it yourself from this code: it takes a minute.
+
 ## Build and install
 
 ```bash
@@ -67,10 +80,6 @@ swift test               # tests (no permissions needed, they never touch your f
 
 You don't need an Apple developer account: `compilar.sh` signs with your "Apple Development" certificate if you have
 one, or ad hoc otherwise. `ALERO_SIN_MUSICA=1 ./compilar.sh` builds without the music reader.
-
-> ⚠️ **Use at your own risk.** Alero is free, open source software without any warranty (see the [license](LICENSE)).
-> Some features use parts of macOS that Apple doesn't document (keyboard light, built-in display brightness, what's
-> playing); if a macOS update changes them, those features turn themselves off.
 
 ## Permissions
 
