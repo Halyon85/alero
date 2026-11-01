@@ -212,10 +212,13 @@ final class PanelesMosaico {
         }
         let tarjeta = TarjetaVidrio(frame: CGRect(origin: .zero, size: tamano))
         let anfitrion = NSHostingView(rootView: vista)
+        anfitrion.wantsLayer = true
+        anfitrion.layer?.backgroundColor = .clear
         anfitrion.frame = tarjeta.bounds
         anfitrion.autoresizingMask = [.width, .height]
         tarjeta.addSubview(anfitrion)
         panel.contentView = tarjeta
+        panel.invalidateShadow()
         panel.alphaValue = 0
         // Toma el teclado (sin activar Alero) para el buscador y para que Esc la cierre.
         panel.makeKeyAndOrderFront(nil)
@@ -307,20 +310,53 @@ private final class PanelAsistente: NSPanel {
 
 /// La tarjeta de vidrio esmerilado de "¿Qué va acá?" (y del selector de formas). Se queda con los clics que caen
 /// entre sus botones, así no pasan a la ventana de abajo.
+/// El borde fino de la tarjeta: solo se dibuja, los clics pasan a los botones de abajo.
+private final class BordeTarjeta: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// Las esquinas redondeadas van con `maskImage` (como pide Apple para el vidrio): recortarlas con la capa dejaba
+/// rebarbas transparentes en los bordes, porque el desenfoque se dibuja antes del recorte. El borde fino va en una
+/// vista aparte, encima.
 private final class TarjetaVidrio: NSVisualEffectView {
-    override init(frame: NSRect) {
+    init(frame: NSRect = .zero, radio: CGFloat = 20) {
         super.init(frame: frame)
         material = .popover
         blendingMode = .behindWindow
         state = .active
-        wantsLayer = true
-        layer?.cornerRadius = 20
-        layer?.masksToBounds = true
-        layer?.borderWidth = 1
-        layer?.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
+        maskImage = TarjetaVidrio.mascara(radio: radio)
+        let borde = BordeTarjeta(frame: bounds)
+        borde.autoresizingMask = [.width, .height]
+        borde.wantsLayer = true
+        borde.layer?.cornerRadius = radio
+        borde.layer?.borderWidth = 1
+        borde.layer?.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
+        addSubview(borde)
     }
 
     required init?(coder: NSCoder) { nil }
+
+    /// Una imagen estirable con las esquinas redondeadas: el vidrio (y la sombra de la ventana) toman su forma.
+    private static func mascara(radio: CGFloat) -> NSImage {
+        let lado = radio * 2 + 1
+        let imagen = NSImage(size: NSSize(width: lado, height: lado), flipped: false) { r in
+            NSColor.black.setFill()
+            NSBezierPath(roundedRect: r, xRadius: radio, yRadius: radio).fill()
+            return true
+        }
+        imagen.capInsets = NSEdgeInsets(top: radio, left: radio, bottom: radio, right: radio)
+        imagen.resizingMode = .stretch
+        return imagen
+    }
+
+    /// El borde va siempre encima de lo que se agregue después (la vista de SwiftUI).
+    override func didAddSubview(_ subview: NSView) {
+        super.didAddSubview(subview)
+        if let borde = subviews.first, borde !== subview, subviews.last !== borde {
+            borde.removeFromSuperview()
+            addSubview(borde, positioned: .above, relativeTo: nil)
+        }
+    }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func mouseDown(with event: NSEvent) {}
@@ -618,9 +654,8 @@ private final class SelectorFormas {
             self?.encima = adentro
             if adentro { self?.espera?.cancel() } else { self?.ocultarPronto() }
         }
-        let tarjeta = TarjetaVidrio(frame: .zero)
+        let tarjeta = TarjetaVidrio(radio: 16)
         tarjeta.material = .hudWindow
-        tarjeta.layer?.cornerRadius = 16
         let anfitrion = AnfitrionPrimerClic(rootView: vista)
         let tamano = anfitrion.fittingSize
         tarjeta.frame = CGRect(origin: .zero, size: tamano)
