@@ -3,8 +3,9 @@
 # Uso: ./compilar.sh            → deja la app en build/Alero.app
 #      ./compilar.sh instalar   → además la copia a /Applications/Alero.app y la abre
 # ALERO_SIN_MUSICA=1 saltea el adaptador de música (la app anda igual, sin reproductor en el notch).
-# ALERO_FIRMA=- firma local (la que se usa para publicar: el certificado "Apple Development" lleva tu correo y es para
-# probar en tus Macs, no para repartir). ALERO_FIRMA="Developer ID Application: …" firma con esa identidad.
+# ALERO_FIRMA=- firma local. ALERO_FIRMA=<identidad o su huella> firma con esa identidad: `herramientas/publicar-version.sh`
+# pasa el Developer ID si hay, o el certificado propio "Halyon Team (Alero)" (el "Apple Development" lleva tu correo
+# y es para probar en tus Macs, no para repartir).
 # ALERO_INFO=<archivo> usa ese Info.plist en vez de Recursos/Info.plist: `herramientas/publicar-version.sh` pasa uno con
 # la versión, la lista de versiones y la clave de Sparkle (solo esas copias buscan actualizaciones, ver docs/PUBLICAR.md).
 set -euo pipefail
@@ -47,10 +48,10 @@ SPARKLE="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
 for pieza in "$SPARKLE/Autoupdate" "$SPARKLE/Updater.app" "$APP/Contents/Frameworks/Sparkle.framework"; do
   codesign --force --options runtime --timestamp=none --sign "${IDENTIDAD:--}" "$pieza"
 done
-# Con la firma local macOS solo deja cargar bibliotecas del mismo equipo de Apple, y la firma local no tiene equipo:
-# sin este permiso Alero no arranca porque no puede abrir Sparkle. Con un certificado de Apple no hace falta.
+# macOS solo deja cargar bibliotecas del mismo equipo de Apple, y la firma local y el certificado propio no tienen
+# equipo: sin este permiso Alero no arranca porque no puede abrir Sparkle. Con un certificado de Apple no hace falta.
 PERMISOS=Recursos/Alero.entitlements
-if [[ -z "$IDENTIDAD" ]]; then
+if [[ -z "$IDENTIDAD" || ( "$IDENTIDAD" != *"Developer ID"* && "$IDENTIDAD" != *"Apple Development"* ) ]]; then
   PERMISOS=build/Alero-firma-local.entitlements
   cp Recursos/Alero.entitlements "$PERMISOS"
   /usr/libexec/PlistBuddy -c "Add :com.apple.security.cs.disable-library-validation bool true" "$PERMISOS"

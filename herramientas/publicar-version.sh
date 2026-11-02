@@ -13,6 +13,7 @@ REPO="Halyon85/alero"
 LISTA="https://github.com/$REPO/releases/latest/download/appcast.xml"   # la lista de versiones que mira la app
 CLAVE_PUBLICA="QSNQJeudUv5e9+77/4rHkP7Au3HOztmF40umYiQbANs="   # la pública: puede estar a la vista
 CUENTA="team.halyon.alero"  # el nombre de la clave privada en el Llavero
+CERTIFICADO="Halyon Team (Alero)"   # el certificado propio para firmar la app (herramientas/crear-certificado.sh)
 SITIO="https://alero.halyon.app"
 
 VERSION=${1:?"Uso: herramientas/publicar-version.sh <versión, por ejemplo 0.2.0>"}
@@ -55,10 +56,18 @@ $PB -c "Add :SUFeedURL string $LISTA" -c "Add :SUPublicEDKey string $CLAVE_PUBLI
     -c "Add :SUEnableAutomaticChecks bool true" -c "Add :SUScheduledCheckInterval integer 86400" \
     -c "Add :SUAllowsAutomaticUpdates bool false" "$INFO"
 
-# Firma: con Developer ID si lo tenés (la cuenta paga de Apple); si no, la firma local. Nunca con el certificado
-# "Apple Development": lleva tu correo y es para probar en tus Macs, no para repartir.
+# Firma: con Developer ID si lo tenés (la cuenta paga de Apple); si no, con el certificado propio, que es siempre el
+# mismo y así macOS no pierde los permisos de las copias instaladas al actualizar. Nunca con "Apple Development":
+# lleva tu correo y es para probar en tus Macs, no para repartir. Sin ninguno de los dos, no se publica.
 FIRMA=$(security find-identity -v -p codesigning | awk -F'"' '/Developer ID Application/ {print $2; exit}')
-ALERO_INFO="$INFO" ALERO_FIRMA="${FIRMA:--}" ./compilar.sh
+NOMBRE_FIRMA=$FIRMA
+if [[ -z "$FIRMA" ]]; then
+  # No es de Apple, así que macOS no lo da por "válido": se busca entre todos y se firma con su huella.
+  FIRMA=$(security find-identity -p codesigning | awk -v nombre="\"$CERTIFICADO\"" 'index($0, nombre) {print $2; exit}')
+  NOMBRE_FIRMA=$CERTIFICADO
+fi
+[[ -n "$FIRMA" ]] || { echo "Falta el certificado «$CERTIFICADO»: crealo con herramientas/crear-certificado.sh (ver docs/PUBLICAR.md)."; exit 1; }
+ALERO_INFO="$INFO" ALERO_FIRMA="$FIRMA" ./compilar.sh
 
 # Que la app armada no lleve el certificado de desarrollo (por si cambia algo en compilar.sh).
 if codesign -dvv build/Alero.app 2>&1 | grep -q "Apple Development"; then
@@ -79,7 +88,7 @@ HERRAMIENTAS=.build/artifacts/sparkle/Sparkle/bin
 grep -q "sparkle:edSignature" "$SALIDA/appcast.xml" || { echo "La lista salió sin firma: revisá la clave del Llavero."; exit 1; }
 
 echo
-echo "Listo: Alero $VERSION (compilación $NUMERO), firmada con ${FIRMA:-la firma local}, en $SALIDA."
+echo "Listo: Alero $VERSION (compilación $NUMERO), firmada con $NOMBRE_FIRMA, en $SALIDA."
 echo "Antes de seguir, subí el código de esta versión (con el número nuevo) a $REPO: la versión se marca sobre su main."
 read "RESPUESTA?¿Crear la versión v$VERSION en GitHub ($REPO) con el .zip y la lista? Escribí «si» para seguir: "
 [[ "$RESPUESTA" == "si" || "$RESPUESTA" == "sí" ]] || {

@@ -13,13 +13,13 @@ Alero updates itself with [Sparkle](https://sparkle-project.org), but **only bui
 
 You don't need the Apple Developer Program (99 USD a year) to publish, but it changes how the app opens the first time:
 
-| | Without it (local, ad-hoc signature) | With Developer ID + notarization |
+| | Without it (own certificate “Halyon Team (Alero)”) | With Developer ID + notarization |
 |---|---|---|
 | First open of the downloaded `.zip` | macOS blocks it: **System Settings → Privacy & Security → Open Anyway** | Opens normally |
 | Updates through Sparkle | Install normally, checked with the Sparkle key | Install normally |
-| Permissions after an update | macOS may ask again (Accessibility, Screen Recording) | Kept |
+| Permissions after an update | Kept (always the same certificate) | Kept |
 
-`publicar-version.sh` uses a “Developer ID Application” certificate if it finds one, and the local signature otherwise. It never uses “Apple Development”: that one carries your e-mail and is for testing on your own Macs, not for handing out (the script checks it and stops).
+`publicar-version.sh` uses a “Developer ID Application” certificate if it finds one, and the own certificate “Halyon Team (Alero)” otherwise (free, made with `herramientas/crear-certificado.sh`). It never uses “Apple Development”: that one carries your e-mail and is for testing on your own Macs, not for handing out (the script checks it and stops). Up to 0.1.1 releases used the local (ad-hoc) signature, which changes with every build: macOS took each version as a different app and the permissions had to be given again.
 
 ## The first time
 
@@ -38,7 +38,15 @@ You don't need the Apple Developer Program (99 USD a year) to publish, but it ch
 
    Once saved, delete that file from the disk.
 
-3. **If you publish your own copy of Alero**, put your public key and your addresses in the first lines of `herramientas/publicar-version.sh`.
+3. **Create the signing certificate** (it stays in your Keychain; the first time macOS may ask “codesign wants to use the key”: **Always Allow**):
+
+   ```bash
+   herramientas/crear-certificado.sh
+   ```
+
+4. **Back it up too**: in Keychain Access, **My Certificates**, right-click “Halyon Team (Alero)” → **Export** → `.p12` with a password, and keep it with the Sparkle key. If it's lost, a new one works, but installed copies ask for their permissions once more.
+
+5. **If you publish your own copy of Alero**, put your public key, your addresses and your certificate name in the first lines of `herramientas/publicar-version.sh` (and the name in `crear-certificado.sh`).
 
 ## Each version
 
@@ -50,7 +58,7 @@ You don't need the Apple Developer Program (99 USD a year) to publish, but it ch
    herramientas/publicar-version.sh 0.2.0
    ```
 
-   It raises the version number in `Recursos/Info.plist` (and commits it), builds the app with the local signature, makes `Alero-0.2.0.zip` with `ditto`, signs it with the Sparkle key and writes `appcast.xml`. Then it stops and asks: push the code of that version, new number included, to `Halyon85/alero` (the release is tagged on its `main`) and answer `si` to create the GitHub release with both files. The app reads the list at `releases/latest/download/appcast.xml`, which always points to the newest release, so no other server is needed.
+   It raises the version number in `Recursos/Info.plist` (and commits it), builds the app signed with the own certificate, makes `Alero-0.2.0.zip` with `ditto`, signs it with the Sparkle key and writes `appcast.xml`. Then it stops and asks: push the code of that version, new number included, to `Halyon85/alero` (the release is tagged on its `main`) and answer `si` to create the GitHub release with both files. The app reads the list at `releases/latest/download/appcast.xml`, which always points to the newest release, so no other server is needed.
 
 Each version is built in its own folder, `build/publicar/<version>/`, and its list has only that version: it's enough to update from any older one.
 
@@ -77,11 +85,11 @@ Sin el Apple Developer Program (99 USD por año) se puede publicar igual, con es
 
 - **La primera vez**, macOS bloquea la app bajada: hay que ir a **Ajustes del Sistema → Privacidad y seguridad → Abrir igual**.
 - **Las actualizaciones** se instalan normal.
-- **Después de cada actualización**, macOS puede volver a pedir los permisos (Accesibilidad, Grabación de pantalla).
+- **Los permisos** (Accesibilidad, Grabación de pantalla) se mantienen al actualizar, porque se firma siempre con el mismo certificado propio.
 
-Con Developer ID y la notarización de Apple, la app abre normal desde el principio y los permisos no se pierden.
+Con Developer ID y la notarización de Apple, además, la app abre normal desde el principio.
 
-`publicar-version.sh` firma con un certificado «Developer ID Application» si lo encuentra y, si no, con la firma local. Nunca usa «Apple Development»: ese lleva tu correo y es para probar en tus Macs, no para repartir (el script lo revisa y frena).
+`publicar-version.sh` firma con un certificado «Developer ID Application» si lo encuentra y, si no, con el certificado propio «Halyon Team (Alero)» (gratis, se crea con `herramientas/crear-certificado.sh`). Nunca usa «Apple Development»: ese lleva tu correo y es para probar en tus Macs, no para repartir (el script lo revisa y frena). Hasta la 0.1.1 se usaba la firma local, que cambia en cada compilación: macOS tomaba cada versión como otra app y había que volver a dar los permisos.
 
 ### La primera vez
 
@@ -100,7 +108,15 @@ Con Developer ID y la notarización de Apple, la app abre normal desde el princi
 
    Después de guardarla, borrá ese archivo del disco.
 
-3. **Si publicás tu propia copia de Alero**, poné tu clave pública y tus direcciones en las primeras líneas de `herramientas/publicar-version.sh`.
+3. **Crear el certificado para firmar** (queda en tu Llavero; la primera vez macOS puede preguntar «codesign quiere usar la llave»: **Permitir siempre**):
+
+   ```bash
+   herramientas/crear-certificado.sh
+   ```
+
+4. **Guardar también una copia del certificado**: en Acceso a Llaveros, **Mis certificados**, clic derecho en «Halyon Team (Alero)» → **Exportar** → `.p12` con una contraseña, y guardalo junto con la clave de Sparkle. Si se pierde, se puede crear otro, pero las copias instaladas piden los permisos una vez más.
+
+5. **Si publicás tu propia copia de Alero**, poné tu clave pública, tus direcciones y el nombre de tu certificado en las primeras líneas de `herramientas/publicar-version.sh` (y el nombre en `crear-certificado.sh`).
 
 ### Cada versión
 
@@ -112,7 +128,7 @@ Con Developer ID y la notarización de Apple, la app abre normal desde el princi
    herramientas/publicar-version.sh 0.2.0
    ```
 
-   Sube el número en `Recursos/Info.plist` (y lo guarda en git), compila con la firma local, arma `Alero-0.2.0.zip` con `ditto`, lo firma con la clave de Sparkle y escribe `appcast.xml`. Ahí frena y pregunta: subí el código de esa versión, con el número nuevo, a `Halyon85/alero` (la versión se marca sobre su `main`) y contestá `si` para crear la versión en GitHub con los dos archivos. La app lee la lista en `releases/latest/download/appcast.xml`, que siempre apunta a la última versión, así que no hace falta otro servidor.
+   Sube el número en `Recursos/Info.plist` (y lo guarda en git), compila firmada con el certificado propio, arma `Alero-0.2.0.zip` con `ditto`, lo firma con la clave de Sparkle y escribe `appcast.xml`. Ahí frena y pregunta: subí el código de esa versión, con el número nuevo, a `Halyon85/alero` (la versión se marca sobre su `main`) y contestá `si` para crear la versión en GitHub con los dos archivos. La app lee la lista en `releases/latest/download/appcast.xml`, que siempre apunta a la última versión, así que no hace falta otro servidor.
 
 Cada versión se arma en su carpeta, `build/publicar/<versión>/`, y su lista lleva solo esa versión: alcanza para actualizar desde cualquiera anterior.
 
