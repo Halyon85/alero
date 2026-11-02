@@ -17,6 +17,8 @@ import Combine
 //   (todas vuelven a como estaban). Si estirás una ventana desde su borde o su esquina, las demás se tapan y la siguen;
 // - con el selector prendido, dejar el mouse un momento sobre el botón verde de una ventana muestra las formas
 //   (completa, mitades, mitad y dos cuartos, cuatro cuartos): tocás dónde va esa ventana y lo demás sigue esa forma;
+// - las ventanas acomodadas quedan acopladas: si minimizás una (o ocultás su app), se minimizan todas y el grupo
+//   queda dormido; cuando volvés cualquiera, vuelven todas a su lugar;
 // - una ventana sale del grupo si la arrastrás afuera (vuelve a su tamaño de antes), la cerrás, la minimizás o la
 //   quitás desde el menú ("Quitar app": vuelve a como estaba). Las que quedan se agrandan para no dejar huecos, y
 //   si queda una sola, el acomodo se termina y esa también vuelve a como estaba. Si una app se corre sola unos
@@ -48,6 +50,10 @@ final class Mosaico {
         var miembros: [Miembro] = []
         /// La forma elegida en el selector del botón verde (lo que se ofrece después la sigue). Nil si se arrastró.
         var plantilla: [ZonaMosaico]?
+        /// Se minimizó una (o se ocultó su app) y se minimizaron todas: el grupo espera a que vuelva cualquiera.
+        var dormido = false
+        /// Cuándo se despertó: mientras vuelven de la animación de macOS no se las toma por minimizadas.
+        var despiertoDesde: CFTimeInterval = 0
         var ocupadas: [ZonaMosaico] { miembros.map(\.zona) }
         var barras: [BarraMosaico] { ReglasMosaico.barras(ocupadas: ocupadas, en: pantalla.visible, divisiones: divisiones) }
     }
@@ -72,6 +78,8 @@ final class Mosaico {
     private var grupos: [Grupo] = []
     private var reloj: Timer?
     private let paneles = PanelesMosaico()
+    /// Se está preguntando a Accesibilidad qué pasó con ventanas que dejaron de verse.
+    private var mirandoIdas = false
     // Mientras se arrastra una barra, se manda a mover una tanda por vez; si llegan más, queda la última.
     private var aplicando = false
     private var pendiente: (pantalla: PantallaCG, corregir: Bool, excepto: CGWindowID?, quitarCortinas: Bool)?
@@ -230,6 +238,8 @@ final class Mosaico {
         let i: Int
         if let existente = grupos.firstIndex(where: { $0.pantalla == pantalla }) {
             i = existente
+            // Uno dormido (sus ventanas minimizadas) se olvida: la nueva arranca un acomodo nuevo.
+            if grupos[i].dormido { grupos[i] = Grupo(pantalla: pantalla) }
         } else {
             grupos.append(Grupo(pantalla: pantalla))
             i = grupos.count - 1
@@ -279,9 +289,9 @@ final class Mosaico {
             vigilar()
             mostrarBarras(visibles: VentanasVisibles.todas())
             AX.cola.async {
-                if devolver { Mosaico.ponerMarco(quitado.ventana, pid: quitado.pid, quitado.antes) }
+                if devolver { Mosaico.colocar(quitado.ventana, pid: quitado.pid, en: quitado.antes) { _ in } }
                 for m in restantes {
-                    Mosaico.ponerMarco(m.ventana, pid: m.pid, m.antes)
+                    Mosaico.colocar(m.ventana, pid: m.pid, en: m.antes) { _ in }
                     if devolver { Mosaico.traerAdelante(m.ventana, pid: m.pid) }
                 }
             }
@@ -314,17 +324,24 @@ final class Mosaico {
     }
 
     private func revisar() {
-        guard arrastre == nil, estirada == nil, !paneles.arrastrandoBarra, !aplicando else { return }
+        guard arrastre == nil, estirada == nil, !paneles.arrastrandoBarra, !aplicando, !mirandoIdas else { return }
         let visibles = VentanasVisibles.todas()
         var marcos: [CGWindowID: CGRect] = [:]
         for v in visibles { marcos[v.id] = v.marco }
         // Con el botón apretado la persona puede estar estirando una ventana: se mira cuando la suelta.
         if NSEvent.pressedMouseButtons == 0 {
-            // Las que ya no están a la vista (cerradas, minimizadas u ocultas) salen, y las demás se agrandan.
-            let idos = grupos.flatMap { g in g.miembros.filter { marcos[$0.id] == nil }.map { (id: $0.id, pantalla: g.pantalla) } }
-            for ido in idos { quitarDelGrupo(ido.id, en: ido.pantalla, devolver: false) }
+            // Un grupo dormido con alguna ventana otra vez a la vista: vuelven todas.
+            for g in grupos where g.dormido && g.miembros.contains(where: { marcos[$0.id] != nil }) { despertar(g.pantalla) }
+            // Las que dejaron de verse en un grupo despierto: ¿se cerraron, se minimizaron o se ocultó su app?
+            let ahora = CACurrentMediaTime()
+            let idas = grupos.filter { !$0.dormido && ahora - $0.despiertoDesde > 1.5 }
+                .flatMap { g in g.miembros.filter { marcos[$0.id] == nil }.map { (miembro: $0, pantalla: g.pantalla) } }
+            if !idas.isEmpty {
+                mirarIdas(idas)
+                return
+            }
             var aplicarEn: [PantallaCG] = []
-            for i in grupos.indices {
+            for i in grupos.indices where !grupos[i].dormido {
                 var g = grupos[i]
                 for j in g.miembros.indices {
                     let m = g.miembros[j]
@@ -346,6 +363,66 @@ final class Mosaico {
         vigilar()
     }
 
+    // MARK: - Acopladas: se minimizan y vuelven juntas
+
+    /// Pregunta a Accesibilidad por las ventanas que dejaron de verse: las cerradas (la app ya no las tiene) salen
+    /// del grupo; si alguna se minimizó o se ocultó su app, el grupo se duerme.
+    private func mirarIdas(_ idas: [(miembro: Miembro, pantalla: PantallaCG)]) {
+        mirandoIdas = true
+        let ocultas = Set(idas.filter { NSRunningApplication(processIdentifier: $0.miembro.pid)?.isHidden == true }.map(\.miembro.id))
+        AX.cola.async { [weak self] in
+            let estados = idas.map { ida -> (id: CGWindowID, pantalla: PantallaCG, dormida: Bool) in
+                let m = ida.miembro
+                let sigue = AX.elementos(AX.app(m.pid), kAXWindowsAttribute).contains { Mosaico.id(de: $0) == m.id }
+                let dormida = sigue && (ocultas.contains(m.id) || AX.booleano(m.ventana, kAXMinimizedAttribute) == true)
+                return (m.id, ida.pantalla, dormida)
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.mirandoIdas = false
+                for e in estados where !e.dormida { self.quitarDelGrupo(e.id, en: e.pantalla, devolver: false) }
+                for e in estados where e.dormida { self.dormir(e.pantalla) }
+            }
+        }
+    }
+
+    /// Se minimizó una del grupo (o se ocultó su app): las demás se minimizan con ella y el grupo queda dormido, con
+    /// todo guardado. No se minimizan las de apps ocultas (vuelven cuando se muestra la app).
+    private func dormir(_ pantalla: PantallaCG) {
+        guard let i = grupos.firstIndex(where: { $0.pantalla == pantalla }), !grupos[i].dormido else { return }
+        grupos[i].dormido = true
+        paneles.cerrarAsistente()
+        paneles.ocultarMenu()
+        mostrarBarras(visibles: VentanasVisibles.todas())
+        let aMinimizar = grupos[i].miembros.filter { NSRunningApplication(processIdentifier: $0.pid)?.isHidden != true }
+        AX.cola.async {
+            for m in aMinimizar where AX.booleano(m.ventana, kAXMinimizedAttribute) != true {
+                AX.poner(m.ventana, kAXMinimizedAttribute, kCFBooleanTrue)
+            }
+        }
+    }
+
+    /// Volvió una del grupo dormido (desde el Dock, o se mostró su app): vuelven todas, cada una a su lugar, y adelante.
+    private func despertar(_ pantalla: PantallaCG) {
+        guard let i = grupos.firstIndex(where: { $0.pantalla == pantalla }), grupos[i].dormido else { return }
+        grupos[i].dormido = false
+        grupos[i].despiertoDesde = CACurrentMediaTime()
+        let miembros = grupos[i].miembros
+        for m in miembros {
+            if let app = NSRunningApplication(processIdentifier: m.pid), app.isHidden { app.unhide() }
+        }
+        AX.cola.async { [weak self] in
+            for m in miembros where AX.booleano(m.ventana, kAXMinimizedAttribute) == true {
+                AX.poner(m.ventana, kAXMinimizedAttribute, kCFBooleanFalse)
+            }
+            // La animación de macOS al volver dura un momento: después, cada una a su lugar y todas adelante.
+            AX.cola.asyncAfter(deadline: .now() + 0.45) {
+                for m in miembros { AXUIElementPerformAction(m.ventana, kAXRaiseAction as CFString) }
+                DispatchQueue.main.async { self?.aplicar(pantalla) }
+            }
+        }
+    }
+
     private func clave(_ tipo: TipoBarra, en pantalla: PantallaCG) -> String { "\(pantalla.marco)-\(tipo)" }
 
     /// Mueve las barras de un grupo adonde están sus divisiones, sin volver a mirar si se ven (mientras se arrastra).
@@ -357,7 +434,7 @@ final class Mosaico {
     /// Una barra se ve si las ventanas de los dos lados están adelante (sin otra encima), mirando en tres alturas.
     private func mostrarBarras(visibles: [VentanaVisible]) {
         var pedidos: [PanelesMosaico.Pedido] = []
-        for grupo in grupos {
+        for grupo in grupos where !grupo.dormido {
             let ids = Set(grupo.miembros.map(\.id))
             // Con el cruce en el medio, las pastillas de las líneas van a los costados (no debajo de la perilla).
             let conCruce = grupo.barras.contains { $0.tipo == .cruce }
@@ -454,7 +531,7 @@ final class Mosaico {
                 self?.colocarNueva(ventana, pid: c.pid, en: zona, destino: destino, pantalla: pantalla)
             }
         } else {
-            esperarVentana(c.pid, en: zona, pantalla: pantalla)
+            esperarVentana(c.pid, en: zona, pantalla: pantalla, abierta: true)
         }
     }
 
@@ -464,27 +541,30 @@ final class Mosaico {
         configuracion.activates = true
         NSWorkspace.shared.openApplication(at: url, configuration: configuracion) { [weak self] app, _ in
             guard let pid = app?.processIdentifier else { return }
-            DispatchQueue.main.async { self?.esperarVentana(pid, en: zona, pantalla: pantalla) }
+            DispatchQueue.main.async { self?.esperarVentana(pid, en: zona, pantalla: pantalla, abierta: true) }
         }
     }
 
-    /// Espera hasta 6 s a que una app que se está abriendo muestre una ventana y la acomoda.
-    private func esperarVentana(_ pid: pid_t, en zona: ZonaMosaico, pantalla: PantallaCG, intento: Int = 0) {
+    /// Espera hasta 6 s a que una app que se está abriendo muestre una ventana y la acomoda. `abierta`: la ventana
+    /// la abrió Alero (no tenía un tamaño propio de antes).
+    private func esperarVentana(_ pid: pid_t, en zona: ZonaMosaico, pantalla: PantallaCG, abierta: Bool, intento: Int = 0) {
         let destino = marco(zona, en: pantalla)
         AX.cola.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             if let ventana = AppsAbiertas.ventanaNueva(pid) {
-                self?.colocarNueva(ventana, pid: pid, en: zona, destino: destino, pantalla: pantalla)
+                self?.colocarNueva(ventana, pid: pid, en: zona, destino: destino, pantalla: pantalla, abierta: abierta)
             } else if intento < 20 {
-                DispatchQueue.main.async { self?.esperarVentana(pid, en: zona, pantalla: pantalla, intento: intento + 1) }
+                DispatchQueue.main.async { self?.esperarVentana(pid, en: zona, pantalla: pantalla, abierta: abierta, intento: intento + 1) }
             }
         }
     }
 
     /// En `AX.cola`: trae la ventana adelante, la pone en `destino` (el rectángulo de la zona, calculado antes en el
-    /// hilo principal) y la suma al grupo.
-    private func colocarNueva(_ ventana: AXUIElement, pid: pid_t, en zona: ZonaMosaico, destino: CGRect, pantalla: PantallaCG) {
+    /// hilo principal) y la suma al grupo. `abierta`: la abrió Alero, así que "como estaba" es la pantalla entera (no
+    /// la ventanita con que abre la app: al salir del acomodo quedaba un cuadrado chico).
+    private func colocarNueva(_ ventana: AXUIElement, pid: pid_t, en zona: ZonaMosaico, destino: CGRect, pantalla: PantallaCG,
+                              abierta: Bool = false) {
         guard let id = Mosaico.id(de: ventana) else { return }
-        let antes = AX.marco(ventana) ?? destino
+        let antes = abierta ? pantalla.visible : (AX.marco(ventana) ?? destino)
         Mosaico.traerAdelante(ventana, pid: pid)
         Mosaico.colocar(ventana, pid: pid, en: destino) { [weak self] quedo in
             DispatchQueue.main.async {
@@ -598,9 +678,7 @@ final class Mosaico {
         vigilar()
         mostrarBarras(visibles: VentanasVisibles.todas())
         AX.cola.async {
-            DispatchQueue.concurrentPerform(iterations: miembros.count) { k in
-                Mosaico.ponerMarco(miembros[k].ventana, pid: miembros[k].pid, miembros[k].antes)
-            }
+            for m in miembros { Mosaico.colocar(m.ventana, pid: m.pid, en: m.antes) { _ in } }
         }
     }
 
@@ -615,7 +693,7 @@ final class Mosaico {
         ultimaMirada = ahora
         var marcos: [CGWindowID: CGRect] = [:]
         for v in VentanasVisibles.todas() { marcos[v.id] = v.marco }
-        for i in grupos.indices {
+        for i in grupos.indices where !grupos[i].dormido {
             let g = grupos[i]
             for (j, m) in g.miembros.enumerated() {
                 if let estirada, estirada.id != m.id { continue }
@@ -683,8 +761,12 @@ final class Mosaico {
                     guard let quedo = quedaron[m.id], let j = self.grupos[i].miembros.firstIndex(where: { $0.id == m.id }) else { continue }
                     self.grupos[i].miembros[j].quedo = quedo
                     if corregir, ajustadas == nil, !Geometria.parecidos(quedo, destino, tolerancia: 3) {
-                        ajustadas = ReglasMosaico.divisiones(siCambio: m.zona, a: quedo, ocupadas: self.grupos[i].ocupadas,
-                                                             en: pantalla.visible, divisiones: self.grupos[i].divisiones)
+                        // Primero, si no entró (la app tiene un tamaño mínimo); si no, si quedó corrida.
+                        let g = self.grupos[i]
+                        ajustadas = ReglasMosaico.divisiones(siNoEntra: m.zona, quedo: quedo, destino: destino, ocupadas: g.ocupadas,
+                                                             en: pantalla.visible, divisiones: g.divisiones)
+                            ?? ReglasMosaico.divisiones(siCambio: m.zona, a: quedo, ocupadas: g.ocupadas,
+                                                        en: pantalla.visible, divisiones: g.divisiones)
                     }
                 }
                 if let otro = self.pendiente {

@@ -381,5 +381,28 @@ enum ReglasMosaico {
         return nuevas == d ? nil : nuevas
     }
 
+    /// Si una ventana quedó más grande que su lugar porque la app tiene un tamaño mínimo (WhatsApp no se deja
+    /// angostar menos de unos 750 pt, y en una MacBook Air de 13" media pantalla es menos): las divisiones con la
+    /// barra corrida justo lo necesario para que entre, achicando a la de al lado. Nil si entra.
+    static func divisiones(siNoEntra zona: ZonaMosaico, quedo r: CGRect, destino: CGRect, ocupadas: [ZonaMosaico], en v: CGRect,
+                           divisiones d: Divisiones) -> Divisiones? {
+        guard let columna = zona.columna else { return nil }
+        let medio = separacion / 2
+        let tipos = Set(barras(ocupadas: ocupadas, en: v, divisiones: d).map(\.tipo))
+        var nuevas = d
+        if tipos.contains(.vertical), r.width > destino.width + 4 {
+            let corte = columna == .izquierda ? v.minX + r.width + medio : v.maxX - r.width - medio
+            nuevas.x = limitar((corte - v.minX) / v.width)
+        }
+        let lineaUnica = tipos.contains(.horizontal(nil))
+        if zona.esCuarto, tipos.contains(.horizontal(columna)) || lineaUnica, r.height > destino.height + 4 {
+            let corte = zona.deArriba ? v.minY + r.height + medio : v.maxY - r.height - medio
+            let y = limitar((corte - v.minY) / v.height)
+            if lineaUnica || columna == .izquierda { nuevas.yIzquierda = y }
+            if lineaUnica || columna == .derecha { nuevas.yDerecha = y }
+        }
+        return nuevas == d ? nil : nuevas
+    }
+
     static func limitar(_ f: CGFloat) -> CGFloat { min(max(f, limite.lowerBound), limite.upperBound) }
 }

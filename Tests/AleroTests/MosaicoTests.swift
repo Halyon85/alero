@@ -182,6 +182,28 @@ final class MosaicoTests: XCTestCase {
         XCTAssertEqual(ReglasMosaico.intercambiar(.arribaIzquierda, .horizontal(nil)), .abajoIzquierda)
     }
 
+    func testAppConTamanoMinimoCorreLaBarra() {
+        // MacBook Air de 13": 1470 pt de ancho. WhatsApp a la derecha no se deja angostar menos de 800.
+        let v = CGRect(x: 0, y: 25, width: 1470, height: 900)
+        let ocupadas: [ZonaMosaico] = [.izquierda, .derecha]
+        let destino = ReglasMosaico.marco(.derecha, en: v)
+        let quedo = CGRect(x: destino.minX, y: 25, width: 800, height: 900)   // se sale por la derecha
+        let nuevas = ReglasMosaico.divisiones(siNoEntra: .derecha, quedo: quedo, destino: destino, ocupadas: ocupadas, en: v,
+                                              divisiones: Divisiones())
+        let corrida = ReglasMosaico.marco(.derecha, en: v, divisiones: nuevas ?? Divisiones())
+        XCTAssertEqual(corrida.width, 800, accuracy: 1)
+        XCTAssertEqual(corrida.maxX, v.maxX)
+        // A la izquierda, lo mismo para el otro lado.
+        let izquierda = ReglasMosaico.marco(.izquierda, en: v)
+        let ancha = CGRect(x: 0, y: 25, width: 800, height: 900)
+        let otras = ReglasMosaico.divisiones(siNoEntra: .izquierda, quedo: ancha, destino: izquierda, ocupadas: ocupadas, en: v,
+                                             divisiones: Divisiones())
+        XCTAssertEqual(ReglasMosaico.marco(.izquierda, en: v, divisiones: otras ?? Divisiones()).width, 800, accuracy: 1)
+        // Si entra, nada.
+        XCTAssertNil(ReglasMosaico.divisiones(siNoEntra: .derecha, quedo: destino, destino: destino, ocupadas: ocupadas, en: v,
+                                              divisiones: Divisiones()))
+    }
+
     func testAgrandarUnaVentanaMueveLaBarra() {
         let v = pantalla.visible
         let ocupadas: [ZonaMosaico] = [.izquierda, .derecha]

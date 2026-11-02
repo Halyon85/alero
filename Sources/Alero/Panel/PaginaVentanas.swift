@@ -54,6 +54,10 @@ struct PaginaVentanas: View {
                  T("Sobre la unión hay una barra: arrastrala para agrandar una y achicar la otra (con cuatro, la perilla del medio va en diagonal); doble clic la centra. Un clic en la barra abre Cambiar, Al medio, Sumar app, Quitar app y Salir.",
                    "A bar sits on the seam: drag it to grow one and shrink the other (with four, the center knob moves diagonally); double-click centers it. Click the bar for Swap, Center, Add app, Remove app and Exit."),
                  icono: "arrow.left.and.right")
+            paso(T("Acopladas", "Docked together"),
+                 T("Si minimizás una (o ocultás su app), se minimizan todas; cuando volvés cualquiera, vuelven todas a su lugar.",
+                   "Minimize one (or hide its app) and they all minimize; bring any back and they all return to their places."),
+                 icono: "rectangle.stack")
             paso(T("Sacar una ventana", "Take a window out"),
                  T("Arrastrala afuera por su barra de arriba (o usá Quitar app) y vuelve a como estaba; las demás se agrandan para no dejar huecos.",
                    "Drag it out by its title bar (or use Remove app) and it goes back to how it was; the others grow to fill the gap."),
