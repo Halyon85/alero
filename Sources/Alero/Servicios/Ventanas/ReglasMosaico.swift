@@ -251,9 +251,29 @@ enum ReglasMosaico {
         return .cuarto(ancha, arriba: false)
     }
 
-    /// Si la ventana `k` (la que se acaba de sumar, en un cuarto) no entra en su columna porque las dos no se dejan
-    /// achicar tanto, pasa al mismo cuarto de la otra columna cuando allá hay una sola ventana de mitad: esa se corre
-    /// al otro cuarto y la que queda sola en la columna de antes pasa a ser la mitad. Nil si no se puede.
+    /// Lo menos que vale la pena dejarle a una ventana en una columna partida: el 30 % del alto. Menos es una franja.
+    static let alturaUtil: CGFloat = 0.3
+
+    /// Cuál de las dos de una columna partida conviene pasar a la otra columna porque juntas no entran cómodas: una
+    /// app que no se deja achicar (WhatsApp no baja de unos 600 pt en una pantalla de 848) dejaría a la otra con una
+    /// franja. Se muda la de mínimo más chico, así la alta queda sola en su columna, siempre que en la otra haya una
+    /// sola ventana (de mitad) y con ella sí entre. Nil si no hace falta o no se puede.
+    static func aMudar(minimos: [ZonaMosaico: CGSize], ocupadas: [ZonaMosaico], alto: CGFloat) -> ZonaMosaico? {
+        let util = alto * alturaUtil
+        func altura(_ z: ZonaMosaico) -> CGFloat { max(minimos[z]?.height ?? 0, util) }
+        for c in [Columna.derecha, .izquierda] where partida(c, ocupadas) && ocupadas.contains(.mitad(c.otra)) {
+            let arriba = ZonaMosaico.cuarto(c, arriba: true)
+            let abajo = ZonaMosaico.cuarto(c, arriba: false)
+            guard altura(arriba) + altura(abajo) > alto else { continue }
+            let movida = (minimos[arriba]?.height ?? 0) < (minimos[abajo]?.height ?? 0) ? arriba : abajo
+            guard altura(movida) + altura(.mitad(c.otra)) <= alto else { continue }
+            return movida
+        }
+        return nil
+    }
+
+    /// La ventana `k` (en un cuarto) pasa al mismo cuarto de la otra columna, donde hay una sola ventana de mitad:
+    /// esa se corre al otro cuarto y la que queda sola en la columna de antes pasa a ser la mitad. Nil si no se puede.
     static func mudar(_ k: Int, ocupadas: [ZonaMosaico]) -> [ZonaMosaico]? {
         guard ocupadas.indices.contains(k) else { return nil }
         let zona = ocupadas[k]

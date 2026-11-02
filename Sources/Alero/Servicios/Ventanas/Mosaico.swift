@@ -1,5 +1,10 @@
 import AppKit
 import Combine
+import os
+
+/// Lo que hace "Acomodar ventanas", para entender una falla sin adivinar (Consola o
+/// `log show --predicate 'subsystem == "team.halyon.alero" && category == "ventanas"' --last 10m`).
+private let registro = Logger(subsystem: "team.halyon.alero", category: "ventanas")
 
 // Acomodar ventanas (Herramientas › Ventanas). Con la llave prendida:
 // - arrastrás una ventana contra un costado, una esquina o arriba y queda en esa mitad, ese cuarto o en toda la
@@ -60,6 +65,8 @@ final class Mosaico {
         var dormido = false
         /// Cuándo se despertó: mientras vuelven de la animación de macOS no se las toma por minimizadas.
         var despiertoDesde: CFTimeInterval = 0
+        /// Cuándo se durmió: mientras se van (la animación de macOS las sigue mostrando) no se las toma por vueltas.
+        var dormidoDesde: CFTimeInterval = 0
         /// Todas sus ventanas están en otro escritorio (o en una app a pantalla completa): se espera a que vuelvan.
         var fuera = false
         /// La que se acaba de sumar en un cuarto: si no entra en su columna, todavía puede pasar a la otra (una vez).
@@ -110,10 +117,22 @@ final class Mosaico {
     }
     /// Cada clic lleva un número: lo que averigua `AX.cola` de un clic viejo se descarta.
     private var clic = 0
-    /// El botón amarillo de una ventana acomodada que tiene el mouse apretado encima (al soltar, se duermen todas).
-    private var amarillo: (id: CGWindowID, pantalla: PantallaCG, boton: CGRect)?
-    /// Un clic en el Dock sobre una ventana minimizada de un grupo dormido (al soltar, vuelven todas).
-    private var despertarAlSoltar: (pantalla: PantallaCG, punto: CGPoint)?
+    /// El clic de ahora, si fue en el botón amarillo de una ventana acomodada o en el Dock con un grupo dormido.
+    private var clicActual: Clic?
+    private struct Clic {
+        let numero: Int
+        let abajo: CGPoint
+        var arriba: CGPoint?
+        var soltadoEn: CFTimeInterval = 0
+        /// Lo que averiguó `AX.cola` (puede llegar antes o después de soltar).
+        var accion: AccionClic?
+    }
+    private enum AccionClic {
+        /// El botón amarillo de una ventana acomodada: al soltar adentro, se duermen todas.
+        case dormir(PantallaCG, id: CGWindowID, boton: CGRect)
+        /// Una ventana minimizada (o el ícono de una app) de un grupo dormido en el Dock: vuelven todas.
+        case despertar(PantallaCG)
+    }
     /// La última app que dejó de estar al frente y cuándo: si enseguida se oculta, la ocultó la persona (Cmd+H).
     private var ultimaDesactivada: (pid: pid_t, cuando: CFTimeInterval)?
     private var avisos: [NSObjectProtocol] = []
@@ -205,8 +224,7 @@ final class Mosaico {
         paneles.ocultarSelector()
         arrastre = nil
         clic += 1
-        amarillo = nil
-        despertarAlSoltar = nil
+        clicActual = Clic(numero: clic, abajo: p)
         if grupos.contains(where: \.dormido) { mirarDock(p) }
         guard let v = VentanasVisibles.bajo(p), p.y - v.marco.minY <= 60 else { return }
         arrastre = Arrastre(id: v.id, pid: v.pid, inicial: v.marco, actual: v.marco)
@@ -322,6 +340,8 @@ final class Mosaico {
             quedan.append(movido)
         }
         grupos[i].miembros = quedan + [miembro]
+        let ocupadas = grupos[i].ocupadas
+        registro.notice("Se suma una ventana en \(String(describing: miembro.zona), privacy: .public): \(String(describing: ocupadas), privacy: .public)")
         grupos[i].fuera = false
         grupos[i].mudable = miembro.zona.esCuarto ? miembro.id : nil
         let unificadas = ReglasMosaico.unificar(grupos[i].divisiones, ocupadas: grupos[i].ocupadas)
@@ -405,13 +425,17 @@ final class Mosaico {
         if NSEvent.pressedMouseButtons == 0 {
             // Un grupo dormido con alguna ventana otra vez a la vista: vuelven todas. Uno que estaba en otro
             // escritorio y se ve de nuevo: sigue como siempre.
-            for g in grupos where g.dormido && g.miembros.contains(where: { marcos[$0.id] != nil }) { despertar(g.pantalla) }
+            // No en el segundo y medio después de dormirlo: mientras se van, macOS las sigue mostrando, y se las
+            // tomaba por vueltas (se abrían y se cerraban sin parar).
+            let ahora = CACurrentMediaTime()
+            for g in grupos where g.dormido && ahora - g.dormidoDesde > 1.5 && g.miembros.contains(where: { marcos[$0.id] != nil }) {
+                despertar(g.pantalla, por: "se volvió a ver")
+            }
             for i in grupos.indices where grupos[i].fuera && grupos[i].miembros.contains(where: { marcos[$0.id] != nil }) {
                 grupos[i].fuera = false
             }
             // Las que dejaron de verse en un grupo despierto: ¿se cerraron, se minimizaron o están en otro escritorio?
             // Las de una app oculta no: eso lo avisa macOS (`seOculto`) y vuelven solas cuando se muestra la app.
-            let ahora = CACurrentMediaTime()
             let idas = grupos.filter { !$0.dormido && !$0.fuera && ahora - $0.despiertoDesde > 1.5 }
                 .flatMap { g in
                     g.miembros.filter { marcos[$0.id] == nil && NSRunningApplication(processIdentifier: $0.pid)?.isHidden != true }
@@ -468,8 +492,9 @@ final class Mosaico {
                 for pantalla in pantallas {
                     guard let g = self.grupos.first(where: { $0.pantalla == pantalla }) else { continue }
                     let que = Mosaico.decidir(g.miembros.map(\.id), estados: estados)
+                    registro.notice("Dejaron de verse: \(String(describing: estados), privacy: .public) → salen \(que.quitar.count), duerme \(que.dormir), fuera \(que.fuera)")
                     for id in que.quitar { self.quitarDelGrupo(id, en: pantalla, devolver: false) }
-                    if que.dormir { self.dormir(pantalla) }
+                    if que.dormir { self.dormir(pantalla, por: "la revisión la vio minimizada") }
                     if que.fuera, let i = self.grupos.firstIndex(where: { $0.pantalla == pantalla }) { self.grupos[i].fuera = true }
                 }
             }
@@ -552,8 +577,8 @@ final class Mosaico {
         guard let grupo = grupos.first(where: { g in g.miembros.contains { $0.id == id } }) else { return }
         // Las que minimiza o devuelve Alero también avisan: con el grupo ya dormido (o despierto) no hacen nada. Las
         // que llegan justo después de despertarlo son de las que se minimizaron antes y terminaron tarde.
-        if minimizada && !grupo.dormido && CACurrentMediaTime() - grupo.despiertoDesde > 1.5 { dormir(grupo.pantalla) }
-        if !minimizada && grupo.dormido { despertar(grupo.pantalla) }
+        if minimizada && !grupo.dormido && CACurrentMediaTime() - grupo.despiertoDesde > 1.5 { dormir(grupo.pantalla, por: "aviso de la app") }
+        if !minimizada && grupo.dormido { despertar(grupo.pantalla, por: "aviso de la app") }
     }
 
     /// El mouse se apretó cerca del semáforo de una ventana acomodada: si es su botón amarillo, se anota.
@@ -565,10 +590,7 @@ final class Mosaico {
                   !CFEqual(elemento, AX.app(v.pid)),
                   AX.texto(elemento, kAXSubroleAttribute) == kAXMinimizeButtonSubrole,
                   let boton = AX.marco(elemento) else { return }
-            DispatchQueue.main.async {
-                guard let self, self.clic == numero else { return }
-                self.amarillo = (v.id, pantalla, boton)
-            }
+            DispatchQueue.main.async { self?.resolver(numero, .dormir(pantalla, id: v.id, boton: boton)) }
         }
     }
 
@@ -580,21 +602,53 @@ final class Mosaico {
         let numero = clic
         AX.cola.async { [weak self] in
             guard let pantalla = Mosaico.grupoDelDock(p, horizontal: franja.horizontal, dormidos: dormidos) else { return }
-            DispatchQueue.main.async {
-                guard let self, self.clic == numero else { return }
-                self.despertarAlSoltar = (pantalla, p)
-            }
+            DispatchQueue.main.async { self?.resolver(numero, .despertar(pantalla)) }
         }
     }
 
     /// Al soltar el mouse: sobre el botón amarillo que se apretó, las demás se minimizan ya, a la vez que esa (macOS
-    /// avisaría recién cuando termine de irse); en el Dock, vuelven todas juntas.
+    /// avisaría recién cuando termine de irse); en el Dock, vuelven todas juntas. Si `AX.cola` todavía no contestó,
+    /// se hace cuando conteste (`resolver`).
     private func soltarClic(en p: CGPoint) {
-        clic += 1
-        if let a = amarillo, a.boton.insetBy(dx: -3, dy: -3).contains(p) { dormir(a.pantalla, excepto: a.id) }
-        if let d = despertarAlSoltar, hypot(p.x - d.punto.x, p.y - d.punto.y) < 8 { despertar(d.pantalla) }
-        amarillo = nil
-        despertarAlSoltar = nil
+        guard var c = clicActual else { return }
+        c.arriba = p
+        c.soltadoEn = CACurrentMediaTime()
+        clicActual = c
+        if c.accion != nil { hacer(c) }
+    }
+
+    /// Llegó lo que averiguó `AX.cola` de un clic: si ya se soltó (hace poco), se hace; si no, espera a que se suelte.
+    private func resolver(_ numero: Int, _ accion: AccionClic) {
+        guard var c = clicActual, c.numero == numero else { return }
+        c.accion = accion
+        clicActual = c
+        // Si contesta muy tarde, ya llegó el aviso de macOS: no hace falta.
+        if c.arriba != nil, CACurrentMediaTime() - c.soltadoEn < 0.6 { hacer(c) }
+    }
+
+    private func hacer(_ c: Clic) {
+        clicActual = nil
+        guard let arriba = c.arriba else { return }
+        switch c.accion {
+        case .dormir(let pantalla, let id, let boton):
+            if boton.insetBy(dx: -3, dy: -3).contains(arriba) { dormir(pantalla, excepto: [id], por: "botón amarillo") }
+        case .despertar(let pantalla):
+            if hypot(arriba.x - c.abajo.x, arriba.y - c.abajo.y) < 8 { despertar(pantalla, por: "clic en el Dock") }
+        case nil:
+            break
+        }
+    }
+
+    /// El clic en el ícono del Dock (`VentanasApp`, en `AX.cola`) va a minimizar o devolver las ventanas de una app:
+    /// si alguna está acomodada, las demás del grupo la acompañan ya, sin esperar el aviso de macOS (llega cuando
+    /// termina la animación, y por eso iban de a una). Hilo principal.
+    func acompanar(_ pid: pid_t, minimizar: Bool) {
+        if minimizar, let g = grupos.first(where: { g in !g.dormido && g.miembros.contains { $0.pid == pid } }) {
+            dormir(g.pantalla, excepto: Set(g.miembros.filter { $0.pid == pid }.map(\.id)), por: "clic en el ícono")
+        }
+        if !minimizar, let g = grupos.first(where: { g in g.dormido && g.miembros.contains { $0.pid == pid } }) {
+            despertar(g.pantalla, por: "clic en el ícono")
+        }
     }
 
     /// En `AX.cola`: el grupo dormido al que vuelve un clic en el Dock, o nil. Una ventana minimizada se reconoce por
@@ -630,13 +684,16 @@ final class Mosaico {
     /// Se minimizó una del grupo (o la persona ocultó su app): las demás se minimizan con ella y el grupo queda
     /// dormido, con todo guardado. No se minimizan `excepto` (la que ya se está yendo) ni las de apps ocultas
     /// (vuelven cuando se muestra la app).
-    private func dormir(_ pantalla: PantallaCG, excepto: CGWindowID? = nil) {
+    private func dormir(_ pantalla: PantallaCG, excepto: Set<CGWindowID> = [], por motivo: String) {
         guard let i = grupos.firstIndex(where: { $0.pantalla == pantalla }), !grupos[i].dormido else { return }
+        let cuantas = grupos[i].miembros.count
+        registro.notice("Se duerme el grupo (\(motivo, privacy: .public)): \(cuantas) ventanas")
         grupos[i].dormido = true
+        grupos[i].dormidoDesde = CACurrentMediaTime()
         paneles.cerrarAsistente()
         paneles.ocultarMenu()
         mostrarBarras(visibles: VentanasVisibles.todas())
-        let aMinimizar = grupos[i].miembros.filter { $0.id != excepto && NSRunningApplication(processIdentifier: $0.pid)?.isHidden != true }
+        let aMinimizar = grupos[i].miembros.filter { !excepto.contains($0.id) && NSRunningApplication(processIdentifier: $0.pid)?.isHidden != true }
         // En paralelo (una app por hilo), así se van todas a la vez.
         AX.cola.async {
             DispatchQueue.concurrentPerform(iterations: aMinimizar.count) { k in
@@ -648,8 +705,9 @@ final class Mosaico {
 
     /// Volvió una del grupo dormido (desde el Dock, o se mostró su app): vuelven todas y, cuando termina la animación
     /// de macOS, cada una a su lugar y adelante (`reponer`).
-    private func despertar(_ pantalla: PantallaCG) {
+    private func despertar(_ pantalla: PantallaCG, por motivo: String) {
         guard let i = grupos.firstIndex(where: { $0.pantalla == pantalla }), grupos[i].dormido else { return }
+        registro.notice("Se despierta el grupo (\(motivo, privacy: .public))")
         grupos[i].dormido = false
         grupos[i].fuera = false
         grupos[i].despiertoDesde = CACurrentMediaTime()
@@ -685,12 +743,12 @@ final class Mosaico {
         let pid = app.processIdentifier
         guard let g = grupos.first(where: { g in !g.dormido && g.miembros.contains { $0.pid == pid } }) else { return }
         let propia = app.isActive || ultimaDesactivada.map { $0.pid == pid && CACurrentMediaTime() - $0.cuando < 1 } == true
-        if propia { dormir(g.pantalla) }
+        if propia { dormir(g.pantalla, por: "se ocultó la app") }
     }
 
     private func seMostro(_ app: NSRunningApplication) {
         let pid = app.processIdentifier
-        if let g = grupos.first(where: { g in g.dormido && g.miembros.contains { $0.pid == pid } }) { despertar(g.pantalla) }
+        if let g = grupos.first(where: { g in g.dormido && g.miembros.contains { $0.pid == pid } }) { despertar(g.pantalla, por: "se mostró la app") }
     }
 
     /// Se cerró una app: sus ventanas salen de los grupos al instante y se olvida cuánto se dejaba achicar.
@@ -1042,15 +1100,18 @@ final class Mosaico {
         return lista
     }
 
-    /// Corre las barras del grupo `i` para que cada ventana tenga su mínimo; si en una columna no entran dos y la
-    /// recién sumada todavía se puede mudar, pasa a la otra columna (`ReglasMosaico.mudar`). Si cambió algo.
+    /// Corre las barras del grupo `i` para que cada ventana tenga su mínimo. Si se acaba de sumar una (`mudable`) y en
+    /// una columna dos no entran cómodas (una app alta como WhatsApp), una pasa a la otra columna
+    /// (`ReglasMosaico.aMudar`), una sola vez. Si cambió algo.
     @discardableResult
     private func ajustar(_ i: Int) -> Bool {
         let g = grupos[i]
         let v = g.pantalla.visible
-        let r = ReglasMosaico.respetar(g.divisiones, minimos: minimosPorZona(g), ocupadas: g.ocupadas, en: v)
-        if !r.entra, let id = g.mudable, let k = g.miembros.firstIndex(where: { $0.id == id }),
-           let zonas = ReglasMosaico.mudar(k, ocupadas: g.ocupadas) {
+        let minimos = minimosPorZona(g)
+        let r = ReglasMosaico.respetar(g.divisiones, minimos: minimos, ocupadas: g.ocupadas, en: v)
+        if g.mudable != nil, let zona = ReglasMosaico.aMudar(minimos: minimos, ocupadas: g.ocupadas, alto: v.height),
+           let k = g.ocupadas.firstIndex(of: zona), let zonas = ReglasMosaico.mudar(k, ocupadas: g.ocupadas) {
+            registro.notice("Se muda de columna una ventana: \(String(describing: g.ocupadas), privacy: .public) → \(String(describing: zonas), privacy: .public)")
             grupos[i].mudable = nil
             for (j, zona) in zonas.enumerated() { grupos[i].miembros[j].zona = zona }
             let unificadas = ReglasMosaico.unificar(g.divisiones, ocupadas: zonas)
@@ -1129,7 +1190,15 @@ final class Mosaico {
             grupos[i].miembros[j].quedo = quedo
             let antes = minimos[t.miembro.pid] ?? .zero
             let minimo = ReglasMosaico.minimo(quedo: quedo, pedido: t.pedido, antes: antes, en: pantalla.visible)
-            if minimo != antes { minimos[t.miembro.pid] = minimo }
+            if minimo != antes {
+                minimos[t.miembro.pid] = minimo
+                let app = NSRunningApplication(processIdentifier: t.miembro.pid)?.localizedName ?? "?"
+                registro.notice("\(app, privacy: .public) no se deja achicar a menos de \(Int(minimo.width))×\(Int(minimo.height))")
+            }
+        }
+        for t in tanda where !(quedaron[t.miembro.id].map { Geometria.parecidos($0, t.destino, tolerancia: 3) } ?? false) {
+            let quedo = quedaron[t.miembro.id].map { "\($0)" } ?? "sin respuesta"
+            registro.notice("No quedó en su lugar: pedido \("\(t.destino)", privacy: .public), quedó \(quedo, privacy: .public)")
         }
         // Si mientras tanto se pidió otra pasada para esta pantalla, esa ya trae lo último.
         if let k = pendientes.firstIndex(where: { $0.pantalla == pantalla }) {

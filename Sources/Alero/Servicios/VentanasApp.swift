@@ -55,6 +55,8 @@ final class VentanasApp {
             DispatchQueue.main.async { _ = app.hide() }
             ultima = (pid, .ocultar, [], CACurrentMediaTime())
         case .minimizar(let ventanas):
+            // Si alguna está acomodada en "Acomodar ventanas", las demás del grupo se van a la vez.
+            DispatchQueue.main.async { Mosaico.shared.acompanar(pid, minimizar: true) }
             ventanas.forEach { AX.poner($0, kAXMinimizedAttribute, kCFBooleanTrue) }
             minimizadas[pid] = ventanas
             ultima = (pid, objetivo.accion, ventanas, CACurrentMediaTime())
@@ -68,6 +70,7 @@ final class VentanasApp {
             AX.poner(ventana, kAXMainAttribute, kCFBooleanTrue)
             AXUIElementPerformAction(ventana, kAXRaiseAction as CFString)
         case .restaurar:
+            DispatchQueue.main.async { Mosaico.shared.acompanar(pid, minimizar: false) }
             let ventanas = (minimizadas.removeValue(forKey: pid) ?? []).filter { AX.booleano($0, kAXMinimizedAttribute) == true }
             ventanas.reversed().forEach { AX.poner($0, kAXMinimizedAttribute, kCFBooleanFalse) }
             if let adelante = ventanas.first {

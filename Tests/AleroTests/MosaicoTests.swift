@@ -237,6 +237,30 @@ final class MosaicoTests: XCTestCase {
         XCTAssertEqual(ReglasMosaico.dentro(chrome, minimo: .zero, en: v), chrome)
     }
 
+    /// La segunda captura de Maxi: Claude a la izquierda, Chrome arriba a la derecha y WhatsApp (que no baja de 599 pt)
+    /// abajo. Entraban justo, pero a Chrome le quedaba una franja de 249 pt y se veía roto. WhatsApp queda sola a la
+    /// derecha y Chrome pasa a la izquierda con Claude.
+    func testUnaAppAltaQuedaSolaEnSuColumna() {
+        let alto: CGFloat = 848
+        let zonas: [ZonaMosaico] = [.izquierda, .arribaDerecha, .abajoDerecha]
+        let soloWhatsApp: [ZonaMosaico: CGSize] = [.abajoDerecha: CGSize(width: 0, height: 599)]
+        XCTAssertEqual(ReglasMosaico.aMudar(minimos: soloWhatsApp, ocupadas: zonas, alto: alto), .arribaDerecha)
+        let k = zonas.firstIndex(of: .arribaDerecha)!
+        XCTAssertEqual(ReglasMosaico.mudar(k, ocupadas: zonas), [.abajoIzquierda, .arribaIzquierda, .derecha])
+        // Al revés (WhatsApp arriba y Chrome abajo), se muda Chrome igual: la de mínimo más chico.
+        XCTAssertEqual(ReglasMosaico.aMudar(minimos: [.arribaDerecha: CGSize(width: 0, height: 578), .abajoDerecha: CGSize(width: 0, height: 272)],
+                                            ocupadas: zonas, alto: alto), .abajoDerecha)
+        // Apps comunes entran cómodas: no se muda nada.
+        XCTAssertNil(ReglasMosaico.aMudar(minimos: [:], ocupadas: zonas, alto: alto))
+        XCTAssertNil(ReglasMosaico.aMudar(minimos: [.abajoDerecha: CGSize(width: 0, height: 400)], ocupadas: zonas, alto: alto))
+        // Si del otro lado tampoco entra (la de allá también es alta), no se gana nada: se queda.
+        var dosAltas = soloWhatsApp
+        dosAltas[.izquierda] = CGSize(width: 0, height: 700)
+        XCTAssertNil(ReglasMosaico.aMudar(minimos: dosAltas, ocupadas: zonas, alto: alto))
+        // Con cuatro no hay a dónde ir.
+        XCTAssertNil(ReglasMosaico.aMudar(minimos: [.abajoDerecha: CGSize(width: 0, height: 599)], ocupadas: cuatro, alto: alto))
+    }
+
     func testDondeSumarEvitaLaColumnaDeUnaAppAlta() {
         let ocupadas: [ZonaMosaico] = [.izquierda, .derecha]
         // Sin saber nada, la derecha (como siempre); si WhatsApp a la derecha no baja del 68 % del alto, la izquierda.
