@@ -67,7 +67,13 @@ if [[ -z "$FIRMA" ]]; then
   NOMBRE_FIRMA=$CERTIFICADO
 fi
 [[ -n "$FIRMA" ]] || { echo "Falta el certificado «$CERTIFICADO»: crealo con herramientas/crear-certificado.sh (ver docs/PUBLICAR.md)."; exit 1; }
-ALERO_INFO="$INFO" ALERO_FIRMA="$FIRMA" ./compilar.sh
+ALERO_UNIVERSAL=1 ALERO_INFO="$INFO" ALERO_FIRMA="$FIRMA" ./compilar.sh
+
+# Para Mac con Apple Silicon y con Intel: la app y el adaptador de música tienen que traer las dos.
+for pieza in build/Alero.app/Contents/MacOS/Alero build/Alero.app/Contents/Resources/MediaRemoteAdapter.framework/MediaRemoteAdapter; do
+  [[ "$(lipo -archs "$pieza")" == *x86_64* && "$(lipo -archs "$pieza")" == *arm64* ]] || {
+    echo "$pieza no quedó universal ($(lipo -archs "$pieza")): no se publica."; exit 1; }
+done
 
 # Que la app armada no lleve el certificado de desarrollo (por si cambia algo en compilar.sh).
 if codesign -dvv build/Alero.app 2>&1 | grep -q "Apple Development"; then

@@ -53,7 +53,7 @@ Cada función se puede apagar y, apagada, no hace nada de fondo. En reposo: unos
 
 ## Requisitos
 
-- macOS 14 o más nuevo, Apple Silicon.
+- macOS 14 o más nuevo, Apple Silicon o Intel (la descarga es universal; `compilar.sh` arma para Apple Silicon y `ALERO_UNIVERSAL=1 ./compilar.sh`, para las dos).
 - Para compilar: las herramientas de línea de comandos de Xcode (`xcode-select --install`) y `cmake`
   (`brew install cmake`, para el lector de música).
 

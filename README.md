@@ -53,7 +53,7 @@ Every feature can be turned off and, when off, does nothing in the background. I
 
 ## Requirements
 
-- macOS 14 or later, Apple Silicon.
+- macOS 14 or later, Apple Silicon or Intel (the download is universal; `compilar.sh` builds for Apple Silicon, `ALERO_UNIVERSAL=1 ./compilar.sh` for both).
 - To build: the Xcode Command Line Tools (`xcode-select --install`) and `cmake` (`brew install cmake`, for the music reader).
 
 ## Download

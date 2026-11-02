@@ -8,11 +8,20 @@
 # y es para probar en tus Macs, no para repartir).
 # ALERO_INFO=<archivo> usa ese Info.plist en vez de Recursos/Info.plist: `herramientas/publicar-version.sh` pasa uno con
 # la versión, la lista de versiones y la clave de Sparkle (solo esas copias buscan actualizaciones, ver docs/PUBLICAR.md).
+# ALERO_UNIVERSAL=1 la arma para Mac con Apple Silicon y con Intel a la vez (lo pasa `herramientas/publicar-version.sh`);
+# sin eso, solo para Apple Silicon, que tarda la mitad.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-swift build -c release --arch arm64
-CARPETA_BIN="$(swift build -c release --arch arm64 --show-bin-path)"
+if [[ -n "${ALERO_UNIVERSAL:-}" ]]; then
+  ARQUITECTURAS=(--arch arm64 --arch x86_64)
+  ARQUITECTURAS_CMAKE="arm64;x86_64"
+else
+  ARQUITECTURAS=(--arch arm64)
+  ARQUITECTURAS_CMAKE=arm64
+fi
+swift build -c release "${ARQUITECTURAS[@]}"
+CARPETA_BIN="$(swift build -c release "${ARQUITECTURAS[@]}" --show-bin-path)"
 BIN="$CARPETA_BIN/Alero"
 APP="build/Alero.app"
 
@@ -35,7 +44,7 @@ strip -x "$APP/Contents/MacOS/Alero" 2>/dev/null || true
 IDENTIDAD=${ALERO_FIRMA:-$(security find-identity -v -p codesigning | awk -F'"' '/Apple Development/ {print $2; exit}')}
 [[ "$IDENTIDAD" == "-" ]] && IDENTIDAD=
 if [[ -z "${ALERO_SIN_MUSICA:-}" ]]; then
-  cmake -S Vendor/mediaremote-adapter -B build/mra -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 >/dev/null
+  cmake -S Vendor/mediaremote-adapter -B build/mra -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="$ARQUITECTURAS_CMAKE" >/dev/null
   cmake --build build/mra --config Release --target MediaRemoteAdapter >/dev/null
   ditto build/mra/MediaRemoteAdapter.framework "$APP/Contents/Resources/MediaRemoteAdapter.framework"
   cp Vendor/mediaremote-adapter/bin/mediaremote-adapter.pl "$APP/Contents/Resources/"
