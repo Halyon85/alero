@@ -10,8 +10,8 @@ import SwiftUI
 //
 // Cada ventana es fija y transparente; lo que crece es la forma negra. Para no robarle clics a la barra de menú,
 // la ventana solo acepta el mouse cuando el puntero está dentro de la forma actual (Boring Notch y otros dejan
-// una franja invisible que tapa a otras apps). El mouse se escucha con monitores de eventos: sin permisos y sin
-// consultar a cada rato.
+// una franja invisible que tapa a otras apps). El mouse se escucha sin consultar a cada rato: afuera de Alero con
+// `EscuchaMouse` (que sin permisos usa el monitor global de AppKit) y sobre sus ventanas con un monitor local.
 
 final class ControladorNotch {
     static let shared = ControladorNotch()
@@ -20,6 +20,8 @@ final class ControladorNotch {
     /// Notches armados solo para un aviso de brillo en una pantalla sin notch propio (ver `mostrarHud`).
     private var pasajeras: [InstanciaNotch] = []
     private var monitores: [Any] = []
+    /// Lo que pasa afuera de Alero llega por `EscuchaMouse` (se vuelve a prender sola si macOS la apaga).
+    private var oyenteMouse: Int?
     private var suscripciones = Set<AnyCancellable>()
     private var activo = false
 
@@ -88,6 +90,8 @@ final class ControladorNotch {
         activo = false
         monitores.forEach(NSEvent.removeMonitor)
         monitores = []
+        if let oyenteMouse { EscuchaMouse.shared.sacar(oyenteMouse) }
+        oyenteMouse = nil
         (instancias + pasajeras).forEach { $0.cerrarVentana() }
         instancias = []
         pasajeras = []
@@ -194,9 +198,8 @@ final class ControladorNotch {
         let manejar: (NSEvent) -> Void = { [weak self] evento in
             if evento.type == .scrollWheel { self?.instanciaBajoElPuntero()?.deslizar(evento) } else { self?.recibir(evento) }
         }
-        if let global = NSEvent.addGlobalMonitorForEvents(matching: tipos, handler: manejar) {
-            monitores.append(global)
-        }
+        // Afuera de Alero, por la escucha propia; adentro (sobre sus ventanas), con el monitor local de AppKit.
+        oyenteMouse = EscuchaMouse.shared.sumar(tipos, manejar)
         if let local = NSEvent.addLocalMonitorForEvents(matching: tipos, handler: { evento in
             manejar(evento)
             return evento

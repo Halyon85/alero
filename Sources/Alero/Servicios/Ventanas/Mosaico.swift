@@ -35,7 +35,8 @@ private let registro = Logger(subsystem: "team.halyon.alero", category: "ventana
 //   hace al cambiar de tamaño), no sale: vuelve a su lugar;
 // - Alero se acuerda de cuánto se deja achicar cada app (lo ve cuando una queda más grande que su lugar) y corre las
 //   barras para que entren todas; si dos no entran en una columna, la que se acaba de sumar pasa a la otra.
-// El mouse se mira con escuchas globales de AppKit, que solo leen: nunca frenan ni cambian un clic. Lo de
+// El mouse llega por `EscuchaMouse`, que solo lee: nunca frena ni cambia un clic (y se vuelve a prender sola si macOS
+// la apaga). Lo de
 // Accesibilidad va en `AX.cola`; el resto, en el hilo principal. Las cuentas están en `ReglasMosaico` y las
 // ventanitas (vista previa, "¿Qué va acá?" y barras) en `PanelesMosaico`.
 
@@ -88,7 +89,8 @@ final class Mosaico {
     }
 
     private var suscripciones = Set<AnyCancellable>()
-    private var monitor: Any?
+    /// El número de su escucha en `EscuchaMouse` (mientras la llave está prendida).
+    private var oyente: Int?
     private var arrastre: Arrastre?
     private var ultimaMirada: CFTimeInterval = 0
     private var esperaBorde: DispatchWorkItem?
@@ -173,8 +175,8 @@ final class Mosaico {
     }
 
     private func prender(_ prender: Bool, selector: Bool) {
-        if let monitor { NSEvent.removeMonitor(monitor) }
-        monitor = nil
+        if let oyente { EscuchaMouse.shared.sacar(oyente) }
+        oyente = nil
         guard prender else {
             MosaicoDeMacOS.devolver()
             arrastre = nil
@@ -188,9 +190,7 @@ final class Mosaico {
         // El movimiento del mouse solo se mira para el selector del botón verde.
         var eventos: NSEvent.EventTypeMask = [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
         if selector { eventos.insert(.mouseMoved) } else { paneles.ocultarSelector() }
-        monitor = NSEvent.addGlobalMonitorForEvents(matching: eventos) { [weak self] evento in
-            self?.recibir(evento)
-        }
+        oyente = EscuchaMouse.shared.sumar(eventos) { [weak self] evento in self?.recibir(evento) }
     }
 
     /// El puntero en coordenadas de eventos (origen arriba a la izquierda de la pantalla principal).

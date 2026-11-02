@@ -34,10 +34,12 @@ final class HiloEventos: Thread {
         CFRunLoopWakeUp(bucle)
     }
 
-    /// Crea una escucha activa y la suma al hilo. Devuelve nil si macOS no la deja crear (falta Accesibilidad).
+    /// Crea una escucha (activa, salvo `opciones: .listenOnly`: solo mira) y la suma al hilo. Devuelve nil si macOS no
+    /// la deja crear (falta Accesibilidad).
     func agregarEscucha(lugar: CGEventTapLocation, posicion: CGEventTapPlacement, eventos: CGEventMask,
+                        opciones: CGEventTapOptions = .defaultTap,
                         dueno: UnsafeMutableRawPointer, callback: @escaping CGEventTapCallBack) -> CFMachPort? {
-        guard let puerto = CGEvent.tapCreate(tap: lugar, place: posicion, options: .defaultTap,
+        guard let puerto = CGEvent.tapCreate(tap: lugar, place: posicion, options: opciones,
                                              eventsOfInterest: eventos, callback: callback, userInfo: dueno) else { return nil }
         let fuente = CFMachPortCreateRunLoopSource(nil, puerto, 0)
         ejecutar { [bucle] in CFRunLoopAddSource(bucle, fuente, .commonModes) }

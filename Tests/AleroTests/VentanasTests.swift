@@ -68,4 +68,15 @@ final class VentanasTests: XCTestCase {
         XCTAssertTrue(Geometria.parecidos(r, CGRect(x: 0, y: 31, width: 1697, height: 848)))
         XCTAssertFalse(Geometria.parecidos(r, CGRect(x: 0, y: 30, width: 1680, height: 848)))
     }
+
+    /// Ventanas y el notch escuchan el mouse con `EscuchaMouse`: lo que piden con tipos de AppKit tiene que llegar a la
+    /// escucha de macOS como los mismos eventos.
+    func testMascaraDeLaEscuchaDelMouse() {
+        let mascara = EscuchaMouse.mascara([.mouseMoved, .leftMouseDown, .leftMouseDragged, .leftMouseUp, .scrollWheel])
+        for tipo in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseDragged, .leftMouseUp, .scrollWheel] {
+            XCTAssertNotEqual(mascara & (CGEventMask(1) << tipo.rawValue), 0, "falta \(tipo.rawValue)")
+        }
+        XCTAssertEqual(mascara & (CGEventMask(1) << CGEventType.rightMouseDown.rawValue), 0)
+        XCTAssertEqual(EscuchaMouse.mascara([]), 0)
+    }
 }
