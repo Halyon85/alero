@@ -17,8 +17,10 @@ import Combine
 //   (todas vuelven a como estaban). Si estirás una ventana desde su borde o su esquina, las demás se tapan y la siguen;
 // - con el selector prendido, dejar el mouse un momento sobre el botón verde de una ventana muestra las formas
 //   (completa, mitades, mitad y dos cuartos, cuatro cuartos): tocás dónde va esa ventana y lo demás sigue esa forma;
-// - las ventanas acomodadas quedan acopladas: si minimizás una (o ocultás su app), se minimizan todas y el grupo
-//   queda dormido; cuando volvés cualquiera, vuelven todas a su lugar;
+// - las ventanas acomodadas quedan acopladas: si minimizás una (o ocultás su app), se minimizan todas a la vez y el
+//   grupo queda dormido; cuando volvés cualquiera, vuelven todas a su lugar. Cada app avisa al instante por
+//   Accesibilidad (`AXObserver`) cuando minimiza o devuelve una ventana acomodada; la revisión de cada 0,3 s queda de
+//   respaldo;
 // - una ventana sale del grupo si la arrastrás afuera (vuelve a su tamaño de antes), la cerrás, la minimizás o la
 //   quitás desde el menú ("Quitar app": vuelve a como estaba). Las que quedan se agrandan para no dejar huecos, y
 //   si queda una sola, el acomodo se termina y esa también vuelve a como estaba. Si una app se corre sola unos
@@ -80,6 +82,8 @@ final class Mosaico {
     private let paneles = PanelesMosaico()
     /// Se está preguntando a Accesibilidad qué pasó con ventanas que dejaron de verse.
     private var mirandoIdas = false
+    /// Un observador de Accesibilidad por app con ventanas acomodadas (avisa minimizar y volver). Solo en `AX.cola`.
+    private var observadores: [pid_t: AXObserver] = [:]
     // Mientras se arrastra una barra, se manda a mover una tanda por vez; si llegan más, queda la última.
     private var aplicando = false
     private var pendiente: (pantalla: PantallaCG, corregir: Bool, excepto: CGWindowID?, quitarCortinas: Bool)?
@@ -103,6 +107,7 @@ final class Mosaico {
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
         guard prender else {
+            dejarDeEscuchar()
             MosaicoDeMacOS.devolver()
             arrastre = nil
             grupos = []
@@ -256,6 +261,7 @@ final class Mosaico {
             quedan.append(movido)
         }
         grupos[i].miembros = quedan + [miembro]
+        escuchar(miembro)
         let unificadas = ReglasMosaico.unificar(grupos[i].divisiones, ocupadas: grupos[i].ocupadas)
         if unificadas != grupos[i].divisiones { grupos[i].divisiones = unificadas; cambio = true }
         if cambio { aplicar(pantalla) }
@@ -386,6 +392,49 @@ final class Mosaico {
         }
     }
 
+    /// Pide a la app de una ventana acomodada que avise al instante cuando la minimiza o la devuelve (un observador
+    /// por app; los avisos llegan al hilo principal). Así el grupo se va y vuelve junto, sin esperar la revisión.
+    private func escuchar(_ m: Miembro) {
+        let dueno = Unmanaged.passUnretained(self).toOpaque()
+        AX.cola.async { [weak self] in
+            guard let self else { return }
+            var observador = self.observadores[m.pid]
+            if observador == nil {
+                var nuevo: AXObserver?
+                guard AXObserverCreate(m.pid, Mosaico.avisoAX, &nuevo) == .success, let nuevo else { return }
+                CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(nuevo), .commonModes)
+                self.observadores[m.pid] = nuevo
+                observador = nuevo
+            }
+            guard let observador else { return }
+            for aviso in [kAXWindowMiniaturizedNotification, kAXWindowDeminiaturizedNotification] {
+                AXObserverAddNotification(observador, m.ventana, aviso as CFString, dueno)
+            }
+        }
+    }
+
+    /// Al apagar "Acomodar ventanas": se dejan de escuchar todas las apps.
+    private func dejarDeEscuchar() {
+        AX.cola.async { [weak self] in
+            guard let self else { return }
+            for observador in self.observadores.values {
+                CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observador), .commonModes)
+            }
+            self.observadores = [:]
+        }
+    }
+
+    /// El aviso de una app (en el hilo principal): una ventana se minimizó o volvió.
+    private static let avisoAX: AXObserverCallback = { _, elemento, aviso, dueno in
+        guard let dueno, let id = Mosaico.id(de: elemento) else { return }
+        let mosaico = Unmanaged<Mosaico>.fromOpaque(dueno).takeUnretainedValue()
+        let minimizada = (aviso as String) == kAXWindowMiniaturizedNotification
+        guard let grupo = mosaico.grupos.first(where: { g in g.miembros.contains { $0.id == id } }) else { return }
+        // Las que minimiza o devuelve Alero también avisan: con el grupo ya dormido (o despierto) no hacen nada.
+        if minimizada && !grupo.dormido { mosaico.dormir(grupo.pantalla) }
+        if !minimizada && grupo.dormido { mosaico.despertar(grupo.pantalla) }
+    }
+
     /// Se minimizó una del grupo (o se ocultó su app): las demás se minimizan con ella y el grupo queda dormido, con
     /// todo guardado. No se minimizan las de apps ocultas (vuelven cuando se muestra la app).
     private func dormir(_ pantalla: PantallaCG) {
@@ -395,9 +444,11 @@ final class Mosaico {
         paneles.ocultarMenu()
         mostrarBarras(visibles: VentanasVisibles.todas())
         let aMinimizar = grupos[i].miembros.filter { NSRunningApplication(processIdentifier: $0.pid)?.isHidden != true }
+        // En paralelo (una app por hilo), así se van todas a la vez.
         AX.cola.async {
-            for m in aMinimizar where AX.booleano(m.ventana, kAXMinimizedAttribute) != true {
-                AX.poner(m.ventana, kAXMinimizedAttribute, kCFBooleanTrue)
+            DispatchQueue.concurrentPerform(iterations: aMinimizar.count) { k in
+                let m = aMinimizar[k]
+                if AX.booleano(m.ventana, kAXMinimizedAttribute) != true { AX.poner(m.ventana, kAXMinimizedAttribute, kCFBooleanTrue) }
             }
         }
     }
@@ -412,8 +463,9 @@ final class Mosaico {
             if let app = NSRunningApplication(processIdentifier: m.pid), app.isHidden { app.unhide() }
         }
         AX.cola.async { [weak self] in
-            for m in miembros where AX.booleano(m.ventana, kAXMinimizedAttribute) == true {
-                AX.poner(m.ventana, kAXMinimizedAttribute, kCFBooleanFalse)
+            DispatchQueue.concurrentPerform(iterations: miembros.count) { k in
+                let m = miembros[k]
+                if AX.booleano(m.ventana, kAXMinimizedAttribute) == true { AX.poner(m.ventana, kAXMinimizedAttribute, kCFBooleanFalse) }
             }
             // La animación de macOS al volver dura un momento: después, cada una a su lugar y todas adelante.
             AX.cola.asyncAfter(deadline: .now() + 0.45) {
