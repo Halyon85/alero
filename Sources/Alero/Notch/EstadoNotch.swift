@@ -67,7 +67,7 @@ final class EstadoNotch: ObservableObject {
 
     /// El aviso de captura lista (con la miniatura). A diferencia de los otros avisos, aparece aunque el notch esté
     /// abierto: la persona acaba de pedirla.
-    func mostrarCaptura(_ nueva: CapturaLista, durante segundos: TimeInterval = 6) {
+    func mostrarCaptura(_ nueva: CapturaLista, durante segundos: TimeInterval = 5) {
         captura = nueva
         cambiar(a: .captura, volverEn: segundos)
     }

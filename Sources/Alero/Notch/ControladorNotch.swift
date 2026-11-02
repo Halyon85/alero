@@ -272,6 +272,8 @@ final class InstanciaNotch {
     private var teclado: AnyCancellable?
     private var abrirPendiente: DispatchWorkItem?
     private var cerrarPendiente: DispatchWorkItem?
+    /// Si el mouse estaba sobre el notch en el movimiento anterior: la vuelta de un aviso se reanuda solo al salir.
+    private var estabaDentro = false
     private var acumulado: CGFloat = 0
     private var ultimoGesto = Date.distantPast
     /// Cuándo se abrió el notch por pasar el mouse (ver `deslizar`).
@@ -366,6 +368,8 @@ final class InstanciaNotch {
     private func hover(dentro: Bool) {
         let modo = estado.modo
         let pasajero = modo.esPasajero
+        let salio = estabaDentro && !dentro
+        estabaDentro = dentro
         if dentro {
             cerrarPendiente?.cancel()
             cerrarPendiente = nil
@@ -382,7 +386,9 @@ final class InstanciaNotch {
         } else {
             abrirPendiente?.cancel()
             abrirPendiente = nil
-            if pasajero { estado.reanudarVuelta() }
+            // Solo al salir: esto llega con cada movimiento del mouse, y reanudar en cada uno volvía a empezar la
+            // cuenta, así que el aviso de captura no se iba nunca mientras se usaba el mouse.
+            if pasajero && salio { estado.reanudarVuelta() }
             // Al salir se cierra con un cuarto de segundo de margen (Boring cierra a los 100 ms y se siente brusco).
             guard modo.esGrande, cerrarPendiente == nil, Date() >= fijoHasta, !escribiendo else { return }
             let tarea = DispatchWorkItem { [weak self] in
