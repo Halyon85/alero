@@ -214,9 +214,7 @@ final class PanelesMosaico {
         let anfitrion = NSHostingView(rootView: vista)
         anfitrion.wantsLayer = true
         anfitrion.layer?.backgroundColor = .clear
-        anfitrion.frame = tarjeta.bounds
-        anfitrion.autoresizingMask = [.width, .height]
-        tarjeta.addSubview(anfitrion)
+        tarjeta.poner(anfitrion)
         panel.contentView = tarjeta
         panel.invalidateShadow()
         panel.alphaValue = 0
@@ -311,21 +309,25 @@ private final class PanelAsistente: NSPanel {
 /// La tarjeta de vidrio esmerilado de "¿Qué va acá?" (y del selector de formas). Se queda con los clics que caen
 /// entre sus botones, así no pasan a la ventana de abajo.
 /// El borde fino de la tarjeta: solo se dibuja, los clics pasan a los botones de abajo.
-private final class BordeTarjeta: NSView {
+final class BordeTarjeta: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 /// Las esquinas redondeadas van con `maskImage` (como pide Apple para el vidrio): recortarlas con la capa dejaba
 /// rebarbas transparentes en los bordes, porque el desenfoque se dibuja antes del recorte. El borde fino va en una
-/// vista aparte, encima.
-private final class TarjetaVidrio: NSVisualEffectView {
+/// vista aparte, siempre encima: el contenido se agrega con `poner`, que lo deja debajo del borde. (Reacomodar el
+/// borde desde `didAddSubview` lo volvía a agregar, eso volvía a llamar a `didAddSubview` y así sin fin: Alero se
+/// cerraba cada vez que aparecía una tarjeta. Pasó en la 0.1.1.)
+final class TarjetaVidrio: NSVisualEffectView {
+    private let borde: BordeTarjeta
+
     init(frame: NSRect = .zero, radio: CGFloat = 20) {
+        borde = BordeTarjeta(frame: CGRect(origin: .zero, size: frame.size))
         super.init(frame: frame)
         material = .popover
         blendingMode = .behindWindow
         state = .active
         maskImage = TarjetaVidrio.mascara(radio: radio)
-        let borde = BordeTarjeta(frame: bounds)
         borde.autoresizingMask = [.width, .height]
         borde.wantsLayer = true
         borde.layer?.cornerRadius = radio
@@ -349,13 +351,11 @@ private final class TarjetaVidrio: NSVisualEffectView {
         return imagen
     }
 
-    /// El borde va siempre encima de lo que se agregue después (la vista de SwiftUI).
-    override func didAddSubview(_ subview: NSView) {
-        super.didAddSubview(subview)
-        if let borde = subviews.first, borde !== subview, subviews.last !== borde {
-            borde.removeFromSuperview()
-            addSubview(borde, positioned: .above, relativeTo: nil)
-        }
+    /// Agrega el contenido (la vista de SwiftUI) ocupando toda la tarjeta, debajo del borde.
+    func poner(_ contenido: NSView) {
+        contenido.frame = bounds
+        contenido.autoresizingMask = [.width, .height]
+        addSubview(contenido, positioned: .below, relativeTo: borde)
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -659,9 +659,7 @@ private final class SelectorFormas {
         let anfitrion = AnfitrionPrimerClic(rootView: vista)
         let tamano = anfitrion.fittingSize
         tarjeta.frame = CGRect(origin: .zero, size: tamano)
-        anfitrion.frame = tarjeta.bounds
-        anfitrion.autoresizingMask = [.width, .height]
-        tarjeta.addSubview(anfitrion)
+        tarjeta.poner(anfitrion)
         panel.contentView = tarjeta
         // Debajo del botón, alineado con su borde izquierdo y sin salirse de la pantalla.
         var origen = CGPoint(x: boton.minX - 14, y: boton.minY - tamano.height - 8)

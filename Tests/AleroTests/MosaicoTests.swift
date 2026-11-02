@@ -8,6 +8,25 @@ final class MosaicoTests: XCTestCase {
                                       visible: CGRect(x: 0, y: 25, width: 1440, height: 800))
     private let cuatro: [ZonaMosaico] = [.arribaIzquierda, .abajoIzquierda, .arribaDerecha, .abajoDerecha]
 
+    /// La 0.1.1 se cerraba cada vez que aparecía una tarjeta de vidrio ("¿Qué va acá?" o el selector de formas):
+    /// reacomodar el borde al agregar el contenido volvía a agregar y no terminaba nunca.
+    func testTarjetaDeVidrioSinBucleYConElBordeEncima() {
+        let tarjeta = TarjetaVidrio(frame: CGRect(x: 0, y: 0, width: 300, height: 200))
+        let contenido = NSView()
+        tarjeta.poner(contenido)
+        tarjeta.poner(NSView())
+        XCTAssertEqual(tarjeta.subviews.count, 3)
+        XCTAssertTrue(tarjeta.subviews.last is BordeTarjeta)
+        XCTAssertEqual(contenido.frame, tarjeta.bounds)
+        // Los clics pasan a lo de abajo del borde.
+        XCTAssertFalse(tarjeta.hitTest(CGPoint(x: 150, y: 100)) is BordeTarjeta)
+        // El selector la crea sin tamaño y se lo da después: el borde la acompaña.
+        let chica = TarjetaVidrio(radio: 16)
+        chica.frame = CGRect(x: 0, y: 0, width: 120, height: 80)
+        chica.poner(NSView())
+        XCTAssertEqual(chica.subviews.last?.frame, chica.bounds)
+    }
+
     func testZonaSegunElPuntero() {
         func zona(_ x: CGFloat, _ y: CGFloat) -> ZonaMosaico? { ReglasMosaico.zona(en: CGPoint(x: x, y: y), pantalla: pantalla)?.zona }
         XCTAssertEqual(zona(0, 450), .izquierda)
