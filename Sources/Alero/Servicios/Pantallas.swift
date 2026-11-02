@@ -90,7 +90,14 @@ final class Pantallas {
             PantallaCG(marco: Geometria.aEventos($0.frame, altoPrincipal: alto), visible: Geometria.aEventos($0.visibleFrame, altoPrincipal: alto))
         }
         candado.lock()
+        let cambio = lista != nuevas
         lista = nuevas
         candado.unlock()
+        // Ya con la lista nueva: `Mosaico` reacomoda sus grupos (se movió el Dock, se cambió la resolución o se
+        // desconectó un monitor).
+        if cambio { NotificationCenter.default.post(name: Pantallas.cambiaron, object: nil) }
     }
+
+    /// Se avisa en el hilo principal cuando cambia alguna pantalla, después de leerlas.
+    static let cambiaron = Notification.Name("alero.pantallas.cambiaron")
 }

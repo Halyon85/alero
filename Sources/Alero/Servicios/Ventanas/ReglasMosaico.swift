@@ -6,6 +6,8 @@ import CoreGraphics
 // Todo en coordenadas de eventos (origen arriba a la izquierda). La pantalla se piensa como una grilla de 2×2: cada
 // zona ocupa una, dos o las cuatro celdas. Las ventanas quedan pegadas (`separacion`); la barra va encima de la unión.
 // Con las dos columnas partidas, la línea horizontal es una sola (de lado a lado) y en el cruce hay una perilla.
+// Las apps que no se dejan achicar más que cierto tamaño corren las barras (`respetar`); si dos no entran en una
+// columna, la que se sumó pasa a la otra (`mudar`), y ninguna queda afuera de la pantalla (`dentro`).
 
 enum Celda: CaseIterable { case arribaIzquierda, arribaDerecha, abajoIzquierda, abajoDerecha }
 
@@ -49,6 +51,19 @@ enum ZonaMosaico: CaseIterable {
     }
 
     static func mitad(_ columna: Columna) -> ZonaMosaico { columna == .izquierda ? .izquierda : .derecha }
+
+    static func cuarto(_ columna: Columna, arriba: Bool) -> ZonaMosaico {
+        switch (columna, arriba) {
+        case (.izquierda, true): return .arribaIzquierda
+        case (.izquierda, false): return .abajoIzquierda
+        case (.derecha, true): return .arribaDerecha
+        case (.derecha, false): return .abajoDerecha
+        }
+    }
+}
+
+extension Columna {
+    var otra: Columna { self == .izquierda ? .derecha : .izquierda }
 }
 
 /// Las formas del selector del botón verde: cómo queda repartida la pantalla. Al elegir una, sus zonas son la
@@ -223,12 +238,31 @@ enum ReglasMosaico {
 
     /// "Sumar app" desde la barra: lo libre, si hay; si no, se parte la columna más ancha que tiene una ventana de
     /// mitad (la nueva va al cuarto de abajo y la de antes sube al de arriba, ver `acomodar`). Nil con cuatro.
-    static func dondeSumar(ocupadas: [ZonaMosaico], divisiones d: Divisiones) -> ZonaMosaico? {
+    /// Con `minimos` (lo que ya se sabe de cada app, ver `respetar`) y el `alto` visible, no se elige una columna
+    /// cuya ventana no se deja achicar a menos del 60 % del alto (WhatsApp en una pantalla baja): no dejaría lugar.
+    static func dondeSumar(ocupadas: [ZonaMosaico], divisiones d: Divisiones, minimos: [ZonaMosaico: CGSize] = [:],
+                           alto: CGFloat = 0) -> ZonaMosaico? {
         if let libre = libre(ocupadas: ocupadas) { return libre }
         let mitades = [Columna.derecha, .izquierda].filter { ocupadas.contains(.mitad($0)) }
-        guard let primera = mitades.first else { return nil }
-        let ancha = mitades.count == 2 ? (d.x <= 0.5 ? Columna.derecha : .izquierda) : primera
-        return ancha == .izquierda ? .abajoIzquierda : .abajoDerecha
+        let partibles = mitades.filter { alto <= 0 || (minimos[.mitad($0)]?.height ?? 0) <= alto * 0.6 }
+        let opciones = partibles.isEmpty ? mitades : partibles
+        guard let primera = opciones.first else { return nil }
+        let ancha = opciones.count == 2 ? (d.x <= 0.5 ? Columna.derecha : .izquierda) : primera
+        return .cuarto(ancha, arriba: false)
+    }
+
+    /// Si la ventana `k` (la que se acaba de sumar, en un cuarto) no entra en su columna porque las dos no se dejan
+    /// achicar tanto, pasa al mismo cuarto de la otra columna cuando allá hay una sola ventana de mitad: esa se corre
+    /// al otro cuarto y la que queda sola en la columna de antes pasa a ser la mitad. Nil si no se puede.
+    static func mudar(_ k: Int, ocupadas: [ZonaMosaico]) -> [ZonaMosaico]? {
+        guard ocupadas.indices.contains(k) else { return nil }
+        let zona = ocupadas[k]
+        guard zona.esCuarto, let columna = zona.columna, let j = ocupadas.firstIndex(of: .mitad(columna.otra)) else { return nil }
+        var nuevas = ocupadas
+        nuevas[k] = .cuarto(columna.otra, arriba: zona.deArriba)
+        nuevas[j] = .cuarto(columna.otra, arriba: !zona.deArriba)
+        if let pareja = ocupadas.firstIndex(of: .cuarto(columna, arriba: !zona.deArriba)) { nuevas[pareja] = .mitad(columna) }
+        return nuevas
     }
 
     /// Si dos zonas se pisan (comparten alguna celda).
@@ -381,27 +415,63 @@ enum ReglasMosaico {
         return nuevas == d ? nil : nuevas
     }
 
-    /// Si una ventana quedó más grande que su lugar porque la app tiene un tamaño mínimo (WhatsApp no se deja
-    /// angostar menos de unos 750 pt, y en una MacBook Air de 13" media pantalla es menos): las divisiones con la
-    /// barra corrida justo lo necesario para que entre, achicando a la de al lado. Nil si entra.
-    static func divisiones(siNoEntra zona: ZonaMosaico, quedo r: CGRect, destino: CGRect, ocupadas: [ZonaMosaico], en v: CGRect,
-                           divisiones d: Divisiones) -> Divisiones? {
-        guard let columna = zona.columna else { return nil }
-        let medio = separacion / 2
+    /// Las divisiones corridas lo justo para que cada ventana tenga al menos su tamaño mínimo: el que se supo porque
+    /// la app no se dejó achicar más (WhatsApp no baja de unos 750 pt de ancho ni de unos 580 de alto). `entra` es
+    /// falso si en alguna dirección no entran todas (dos apps altas en una misma columna): ahí la barra queda a mitad
+    /// de camino y `dentro` mantiene cada ventana en la pantalla. Las que no tienen mínimo conocido no cuentan.
+    static func respetar(_ d: Divisiones, minimos: [ZonaMosaico: CGSize], ocupadas: [ZonaMosaico],
+                         en v: CGRect) -> (divisiones: Divisiones, entra: Bool) {
+        guard v.width > 0, v.height > 0 else { return (d, true) }
+        func minimo(_ z: ZonaMosaico) -> CGSize { ocupadas.contains(z) ? minimos[z] ?? .zero : .zero }
+        /// `valor` dentro de `desde...hasta`; si el rango está al revés (no entran), el medio.
+        func acotar(_ valor: CGFloat, _ desde: CGFloat, _ hasta: CGFloat) -> (CGFloat, Bool) {
+            desde <= hasta ? (min(max(valor, desde), hasta), true) : ((desde + hasta) / 2, false)
+        }
         let tipos = Set(barras(ocupadas: ocupadas, en: v, divisiones: d).map(\.tipo))
         var nuevas = d
-        if tipos.contains(.vertical), r.width > destino.width + 4 {
-            let corte = columna == .izquierda ? v.minX + r.width + medio : v.maxX - r.width - medio
-            nuevas.x = limitar((corte - v.minX) / v.width)
+        var entra = true
+        if tipos.contains(.vertical) {
+            let ancho = { (c: Columna) in ocupadas.filter { $0.columna == c }.map { minimo($0).width }.max() ?? 0 }
+            let (x, cabe) = acotar(d.x, ancho(.izquierda) / v.width, 1 - ancho(.derecha) / v.width)
+            nuevas.x = x
+            entra = entra && cabe
         }
-        let lineaUnica = tipos.contains(.horizontal(nil))
-        if zona.esCuarto, tipos.contains(.horizontal(columna)) || lineaUnica, r.height > destino.height + 4 {
-            let corte = zona.deArriba ? v.minY + r.height + medio : v.maxY - r.height - medio
-            let y = limitar((corte - v.minY) / v.height)
-            if lineaUnica || columna == .izquierda { nuevas.yIzquierda = y }
-            if lineaUnica || columna == .derecha { nuevas.yDerecha = y }
+        // Lo que puede valer la línea de cada columna partida: desde el mínimo de la de arriba hasta el de la de abajo.
+        let rangos = [Columna.izquierda, .derecha].filter { partida($0, ocupadas) }.map { c in
+            (columna: c, desde: minimo(.cuarto(c, arriba: true)).height / v.height,
+             hasta: 1 - minimo(.cuarto(c, arriba: false)).height / v.height)
         }
-        return nuevas == d ? nil : nuevas
+        if tipos.contains(.horizontal(nil)) {
+            let (y, cabe) = acotar(d.yIzquierda, rangos.map(\.desde).max() ?? 0, rangos.map(\.hasta).min() ?? 1)
+            nuevas.yIzquierda = y
+            nuevas.yDerecha = y
+            entra = entra && cabe
+        } else {
+            for r in rangos {
+                let (y, cabe) = acotar(d.y(r.columna), r.desde, r.hasta)
+                if r.columna == .izquierda { nuevas.yIzquierda = y } else { nuevas.yDerecha = y }
+                entra = entra && cabe
+            }
+        }
+        return (nuevas, entra)
+    }
+
+    /// El lugar de una ventana que no se deja achicar a menos de `minimo`: crece hasta su mínimo y, si así se saldría
+    /// de la parte visible, se corre para adentro (encima de la de al lado) en vez de quedar debajo del Dock.
+    static func dentro(_ r: CGRect, minimo: CGSize, en v: CGRect) -> CGRect {
+        let tamano = CGSize(width: max(r.width, minimo.width), height: max(r.height, minimo.height))
+        let x = r.minX + tamano.width > v.maxX ? max(v.minX, v.maxX - tamano.width) : r.minX
+        let y = r.minY + tamano.height > v.maxY ? max(v.minY, v.maxY - tamano.height) : r.minY
+        return CGRect(origin: CGPoint(x: x, y: y), size: tamano)
+    }
+
+    /// El tamaño mínimo que deja ver una ventana que quedó más grande que lo pedido (`antes`: lo que ya se sabía). Un
+    /// mínimo de casi toda la pantalla no se cree: es una app que todavía no había terminado de achicarse.
+    static func minimo(quedo: CGRect, pedido: CGRect, antes: CGSize, en v: CGRect) -> CGSize {
+        var m = antes
+        if quedo.width > pedido.width + 4, quedo.width < v.width * 0.9 { m.width = max(m.width, quedo.width) }
+        if quedo.height > pedido.height + 4, quedo.height < v.height * 0.9 { m.height = max(m.height, quedo.height) }
+        return m
     }
 
     static func limitar(_ f: CGFloat) -> CGFloat { min(max(f, limite.lowerBound), limite.upperBound) }

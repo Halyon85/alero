@@ -188,20 +188,101 @@ final class MosaicoTests: XCTestCase {
         let ocupadas: [ZonaMosaico] = [.izquierda, .derecha]
         let destino = ReglasMosaico.marco(.derecha, en: v)
         let quedo = CGRect(x: destino.minX, y: 25, width: 800, height: 900)   // se sale por la derecha
-        let nuevas = ReglasMosaico.divisiones(siNoEntra: .derecha, quedo: quedo, destino: destino, ocupadas: ocupadas, en: v,
-                                              divisiones: Divisiones())
-        let corrida = ReglasMosaico.marco(.derecha, en: v, divisiones: nuevas ?? Divisiones())
+        let minimo = ReglasMosaico.minimo(quedo: quedo, pedido: destino, antes: .zero, en: v)
+        XCTAssertEqual(minimo, CGSize(width: 800, height: 0))
+        let r = ReglasMosaico.respetar(Divisiones(), minimos: [.derecha: minimo], ocupadas: ocupadas, en: v)
+        XCTAssertTrue(r.entra)
+        let corrida = ReglasMosaico.marco(.derecha, en: v, divisiones: r.divisiones)
         XCTAssertEqual(corrida.width, 800, accuracy: 1)
         XCTAssertEqual(corrida.maxX, v.maxX)
         // A la izquierda, lo mismo para el otro lado.
-        let izquierda = ReglasMosaico.marco(.izquierda, en: v)
-        let ancha = CGRect(x: 0, y: 25, width: 800, height: 900)
-        let otras = ReglasMosaico.divisiones(siNoEntra: .izquierda, quedo: ancha, destino: izquierda, ocupadas: ocupadas, en: v,
-                                             divisiones: Divisiones())
-        XCTAssertEqual(ReglasMosaico.marco(.izquierda, en: v, divisiones: otras ?? Divisiones()).width, 800, accuracy: 1)
-        // Si entra, nada.
-        XCTAssertNil(ReglasMosaico.divisiones(siNoEntra: .derecha, quedo: destino, destino: destino, ocupadas: ocupadas, en: v,
-                                              divisiones: Divisiones()))
+        let otras = ReglasMosaico.respetar(Divisiones(), minimos: [.izquierda: CGSize(width: 800, height: 0)], ocupadas: ocupadas, en: v)
+        XCTAssertEqual(ReglasMosaico.marco(.izquierda, en: v, divisiones: otras.divisiones).width, 800, accuracy: 1)
+        // Si entra, la barra no se toca.
+        XCTAssertEqual(ReglasMosaico.respetar(Divisiones(), minimos: [.derecha: CGSize(width: 500, height: 0)],
+                                              ocupadas: ocupadas, en: v).divisiones, Divisiones())
+        // Un "mínimo" de casi toda la pantalla es una app que todavía no terminó de achicarse: no se cree.
+        let tarde = ReglasMosaico.minimo(quedo: CGRect(x: 0, y: 25, width: 1400, height: 900), pedido: destino, antes: .zero, en: v)
+        XCTAssertEqual(tarde, .zero)
+    }
+
+    /// Lo que le pasó a Maxi: Claude a la izquierda y WhatsApp a la derecha en una pantalla de 1700×956 (848 pt
+    /// visibles). Al sumar Chrome abajo a la derecha, WhatsApp no bajó de 578 pt de alto y Chrome (que no baja de 272)
+    /// quedó colgando debajo de la pantalla. Ahora: en esa columna no entran las dos, así que Chrome pasa abajo a la
+    /// izquierda, debajo de Claude.
+    func testDosAltasNoEntranEnUnaColumnaYLaNuevaPasaALaOtra() {
+        let v = CGRect(x: 0, y: 30, width: 1700, height: 848)
+        let zonas: [ZonaMosaico] = [.izquierda, .arribaDerecha, .abajoDerecha]   // Claude, WhatsApp, Chrome (la nueva)
+        // Primero se sabe lo de WhatsApp: la línea baja lo justo para que entre.
+        let soloWhatsApp = ReglasMosaico.respetar(Divisiones(), minimos: [.arribaDerecha: CGSize(width: 0, height: 578)],
+                                                  ocupadas: zonas, en: v)
+        XCTAssertTrue(soloWhatsApp.entra)
+        XCTAssertEqual(ReglasMosaico.marco(.arribaDerecha, en: v, divisiones: soloWhatsApp.divisiones).height, 578, accuracy: 1)
+        // Después lo de Chrome: no entran.
+        let minimos: [ZonaMosaico: CGSize] = [.arribaDerecha: CGSize(width: 0, height: 578), .abajoDerecha: CGSize(width: 400, height: 272)]
+        XCTAssertFalse(ReglasMosaico.respetar(soloWhatsApp.divisiones, minimos: minimos, ocupadas: zonas, en: v).entra)
+        // Chrome se muda: Claude arriba a la izquierda, Chrome abajo a la izquierda, WhatsApp toda la derecha.
+        XCTAssertEqual(ReglasMosaico.mudar(2, ocupadas: zonas), [.arribaIzquierda, .derecha, .abajoIzquierda])
+        // Arriba en la otra columna, también arriba.
+        XCTAssertEqual(ReglasMosaico.mudar(1, ocupadas: [.izquierda, .arribaDerecha, .abajoDerecha]),
+                       [.abajoIzquierda, .arribaIzquierda, .derecha])
+        // Si la otra columna ya está partida (o la nueva es una mitad), no hay a dónde ir.
+        XCTAssertNil(ReglasMosaico.mudar(3, ocupadas: cuatro))
+        XCTAssertNil(ReglasMosaico.mudar(1, ocupadas: [.izquierda, .derecha]))
+        // Y ninguna queda debajo del Dock: la que no entra se corre para arriba.
+        let chrome = ReglasMosaico.marco(.abajoDerecha, en: v, divisiones: soloWhatsApp.divisiones)
+        let adentro = ReglasMosaico.dentro(chrome, minimo: CGSize(width: 400, height: 272), en: v)
+        XCTAssertEqual(adentro.maxY, v.maxY)
+        XCTAssertEqual(adentro.height, 272)
+        XCTAssertEqual(ReglasMosaico.dentro(chrome, minimo: .zero, en: v), chrome)
+    }
+
+    func testDondeSumarEvitaLaColumnaDeUnaAppAlta() {
+        let ocupadas: [ZonaMosaico] = [.izquierda, .derecha]
+        // Sin saber nada, la derecha (como siempre); si WhatsApp a la derecha no baja del 68 % del alto, la izquierda.
+        XCTAssertEqual(ReglasMosaico.dondeSumar(ocupadas: ocupadas, divisiones: Divisiones(), minimos: [:], alto: 848), .abajoDerecha)
+        XCTAssertEqual(ReglasMosaico.dondeSumar(ocupadas: ocupadas, divisiones: Divisiones(),
+                                                minimos: [.derecha: CGSize(width: 0, height: 578)], alto: 848), .abajoIzquierda)
+        // Si las dos son altas, igual se ofrece la más ancha.
+        let altas: [ZonaMosaico: CGSize] = [.derecha: CGSize(width: 0, height: 700), .izquierda: CGSize(width: 0, height: 700)]
+        XCTAssertEqual(ReglasMosaico.dondeSumar(ocupadas: ocupadas, divisiones: Divisiones(), minimos: altas, alto: 848), .abajoDerecha)
+    }
+
+    func testLaLineaUnicaRespetaLasDosColumnas() {
+        let v = pantalla.visible
+        // Con cuatro, la línea es una sola: tiene que dejar lugar a la más alta de arriba y a la más alta de abajo.
+        let minimos: [ZonaMosaico: CGSize] = [.arribaIzquierda: CGSize(width: 0, height: 500), .abajoDerecha: CGSize(width: 0, height: 250)]
+        let r = ReglasMosaico.respetar(Divisiones(), minimos: minimos, ocupadas: cuatro, en: v)
+        XCTAssertTrue(r.entra)
+        XCTAssertEqual(r.divisiones.yIzquierda, 500.0 / 800, accuracy: 0.001)
+        XCTAssertEqual(r.divisiones.yDerecha, r.divisiones.yIzquierda)
+        // Dos que no entran a lo ancho: la barra queda a mitad de camino y avisa.
+        let anchas: [ZonaMosaico: CGSize] = [.izquierda: CGSize(width: 900, height: 0), .derecha: CGSize(width: 900, height: 0)]
+        let r2 = ReglasMosaico.respetar(Divisiones(), minimos: anchas, ocupadas: [.izquierda, .derecha], en: v)
+        XCTAssertFalse(r2.entra)
+        XCTAssertEqual(r2.divisiones.x, 0.5, accuracy: 0.001)
+    }
+
+    /// Qué hacer cuando ventanas de un grupo dejan de verse. Antes, cambiar de escritorio desarmaba el grupo (todas
+    /// "se habían ido") y una app que tardaba en contestar contaba como cerrada.
+    func testVentanasQueDejanDeVerse() {
+        let ids: [CGWindowID] = [1, 2, 3]
+        // Se cerró una: sale, las demás siguen.
+        var que = Mosaico.decidir(ids, estados: [3: .cerrada])
+        XCTAssertEqual(que.quitar, [3]); XCTAssertFalse(que.dormir); XCTAssertFalse(que.fuera)
+        // Se minimizó una: se duerme todo, nadie sale.
+        que = Mosaico.decidir(ids, estados: [2: .minimizada])
+        XCTAssertEqual(que.quitar, []); XCTAssertTrue(que.dormir)
+        // Se cambió de escritorio: ninguna a la vista y todas en otro lado. El grupo espera, entero.
+        que = Mosaico.decidir(ids, estados: [1: .otroLado, 2: .otroLado, 3: .otroLado])
+        XCTAssertEqual(que.quitar, []); XCTAssertTrue(que.fuera)
+        // Llevaron una sola a otro escritorio (o a pantalla completa): esa sale.
+        que = Mosaico.decidir(ids, estados: [2: .otroLado])
+        XCTAssertEqual(que.quitar, [2]); XCTAssertFalse(que.fuera)
+        // Una app que no contestó: no se hace nada hasta la próxima.
+        que = Mosaico.decidir(ids, estados: [1: .otroLado, 2: .noSe, 3: .otroLado])
+        XCTAssertEqual(que.quitar, []); XCTAssertFalse(que.fuera); XCTAssertFalse(que.dormir)
+        XCTAssertEqual(Mosaico.decidir(ids, estados: [1: .noSe]).quitar, [])
     }
 
     func testAgrandarUnaVentanaMueveLaBarra() {

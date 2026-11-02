@@ -272,7 +272,9 @@ final class PanelesMosaico {
                 guard let self, let panel else { return }
                 self.menu.alternar(pedido, cerca: panel.convertToScreen(CGRect(origin: centro, size: .zero)).origin)
             }
-            panel.setFrame(PanelesMosaico.aAppKit(pedido.barra.franja), display: true)
+            // Esto corre en cada revisión (cada 0,3 s): solo se redibuja si la barra se movió.
+            let marco = PanelesMosaico.aAppKit(pedido.barra.franja)
+            if panel.frame != marco { panel.setFrame(marco, display: true) }
             if !panel.isVisible { panel.orderFrontRegardless() }
         }
     }
