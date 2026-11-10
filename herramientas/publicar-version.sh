@@ -15,7 +15,9 @@ CLAVE_PUBLICA="QSNQJeudUv5e9+77/4rHkP7Au3HOztmF40umYiQbANs="   # la pública: pu
 CUENTA="team.halyon.alero"  # el nombre de la clave privada en el Llavero
 CERTIFICADO="Halyon Team (Alero)"   # el certificado propio para firmar la app (herramientas/crear-certificado.sh)
 SITIO="https://alero.halyon.app"
-PERFIL_NOTARIO="alero"   # la clave de notarización en el Llavero (xcrun notarytool store-credentials, ver docs/PUBLICAR.md)
+# La clave de notarización en el Llavero (xcrun notarytool store-credentials, ver docs/PUBLICAR.md). Es la misma
+# cuenta de Apple que Dixity, así que se usa su perfil; ALERO_NOTARIO=<nombre> usa otro.
+PERFIL_NOTARIO=${ALERO_NOTARIO:-dixity}
 
 VERSION=${1:?"Uso: herramientas/publicar-version.sh <versión, por ejemplo 0.2.0>"}
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "La versión tiene que ser como 0.2.0"; exit 1; }
