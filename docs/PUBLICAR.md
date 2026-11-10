@@ -46,7 +46,15 @@ You don't need the Apple Developer Program (99 USD a year) to publish, but it ch
 
 4. **Back it up too**: in Keychain Access, **My Certificates**, right-click “Halyon Team (Alero)” → **Export** → `.p12` with a password, and keep it with the Sparkle key. If it's lost, a new one works, but installed copies ask for their permissions once more.
 
-5. **If you publish your own copy of Alero**, put your public key, your addresses and your certificate name in the first lines of `herramientas/publicar-version.sh` (and the name in `crear-certificado.sh`).
+5. **With a Developer ID (paid Apple account): save the notarization key once.** Create an app-specific password at [account.apple.com](https://account.apple.com) → Sign-In and Security → App-Specific Passwords, and store it in your Keychain under the name `alero` (it asks for the password; the team ID is the one in parentheses in your Developer ID certificate):
+
+   ```bash
+   xcrun notarytool store-credentials alero --apple-id YOUR_APPLE_ID --team-id YOUR_TEAM_ID
+   ```
+
+   From then on `publicar-version.sh` sends every build to Apple, waits for the approval and staples it to the app. Copies you build with `compilar.sh` are also signed with the Developer ID, so your own Mac keeps its permissions when it updates.
+
+6. **If you publish your own copy of Alero**, put your public key, your addresses and your certificate name in the first lines of `herramientas/publicar-version.sh` (and the name in `crear-certificado.sh`).
 
 ## Each version
 
@@ -116,7 +124,15 @@ Con Developer ID y la notarización de Apple, además, la app abre normal desde 
 
 4. **Guardar también una copia del certificado**: en Acceso a Llaveros, **Mis certificados**, clic derecho en «Halyon Team (Alero)» → **Exportar** → `.p12` con una contraseña, y guardalo junto con la clave de Sparkle. Si se pierde, se puede crear otro, pero las copias instaladas piden los permisos una vez más.
 
-5. **Si publicás tu propia copia de Alero**, poné tu clave pública, tus direcciones y el nombre de tu certificado en las primeras líneas de `herramientas/publicar-version.sh` (y el nombre en `crear-certificado.sh`).
+5. **Con Developer ID (cuenta paga de Apple): guardar una vez la clave de notarización.** Creá una contraseña de app en [account.apple.com](https://account.apple.com) → Inicio de sesión y seguridad → Contraseñas de apps, y guardala en el Llavero con el nombre `alero` (te la pide; el equipo es lo que va entre paréntesis en tu certificado Developer ID):
+
+   ```bash
+   xcrun notarytool store-credentials alero --apple-id TU_APPLE_ID --team-id TU_EQUIPO
+   ```
+
+   Desde ahí `publicar-version.sh` manda cada versión a Apple, espera que la apruebe y le pega el sello. Lo que compilás con `compilar.sh` también se firma con el Developer ID, así tu Mac no pierde los permisos al actualizarse.
+
+6. **Si publicás tu propia copia de Alero**, poné tu clave pública, tus direcciones y el nombre de tu certificado en las primeras líneas de `herramientas/publicar-version.sh` (y el nombre en `crear-certificado.sh`).
 
 ### Cada versión
 

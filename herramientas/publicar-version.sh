@@ -15,6 +15,7 @@ CLAVE_PUBLICA="QSNQJeudUv5e9+77/4rHkP7Au3HOztmF40umYiQbANs="   # la pública: pu
 CUENTA="team.halyon.alero"  # el nombre de la clave privada en el Llavero
 CERTIFICADO="Halyon Team (Alero)"   # el certificado propio para firmar la app (herramientas/crear-certificado.sh)
 SITIO="https://alero.halyon.app"
+PERFIL_NOTARIO="alero"   # la clave de notarización en el Llavero (xcrun notarytool store-credentials, ver docs/PUBLICAR.md)
 
 VERSION=${1:?"Uso: herramientas/publicar-version.sh <versión, por ejemplo 0.2.0>"}
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "La versión tiene que ser como 0.2.0"; exit 1; }
@@ -78,6 +79,22 @@ done
 # Que la app armada no lleve el certificado de desarrollo (por si cambia algo en compilar.sh).
 if codesign -dvv build/Alero.app 2>&1 | grep -q "Apple Development"; then
   echo "La app quedó firmada con Apple Development: no se publica."; exit 1
+fi
+
+# Con Developer ID, Apple revisa la app (notarización) y le pega su sello: así abre sin «Abrir igual», aun sin internet.
+# Se manda un .zip aparte, se espera la respuesta (unos minutos) y el sello queda dentro de la app (stapler).
+if [[ "$NOMBRE_FIRMA" == *"Developer ID"* ]]; then
+  xcrun notarytool history --keychain-profile "$PERFIL_NOTARIO" >/dev/null 2>&1 || {
+    echo "Falta la clave de notarización «$PERFIL_NOTARIO» en el Llavero: ver docs/PUBLICAR.md."; exit 1; }
+  PARA_APPLE="$SALIDA/para-notarizar.zip"
+  ditto -c -k --sequesterRsrc --keepParent build/Alero.app "$PARA_APPLE"
+  xcrun notarytool submit "$PARA_APPLE" --keychain-profile "$PERFIL_NOTARIO" --wait --timeout 30m \
+    | tee "$SALIDA/notarizacion.txt"
+  grep -q "status: Accepted" "$SALIDA/notarizacion.txt" || {
+    echo "Apple no aprobó la app: mirá el detalle con xcrun notarytool log <id> --keychain-profile $PERFIL_NOTARIO"; exit 1; }
+  rm "$PARA_APPLE"
+  xcrun stapler staple build/Alero.app
+  spctl --assess --type execute build/Alero.app || { echo "macOS no acepta la app notarizada: no se publica."; exit 1; }
 fi
 
 # El .zip (ditto conserva los enlaces y permisos de adentro de la app, cosa que zip no siempre hace).
