@@ -62,8 +62,7 @@ Get the latest `Alero-x.y.z.zip` from [Releases](https://github.com/Halyon85/ale
 `Alero.app` to Applications.
 
 > ⚠️ **Install at your own risk.** Alero is free, open source software without any warranty (see the [license](LICENSE)).
-> It isn't signed with an Apple Developer ID yet, so the first time macOS blocks it: open **System Settings → Privacy &
-> Security**, scroll down and click **Open Anyway** next to Alero. You only do this once. Some features use parts of
+> Since 0.1.5 it's signed with an Apple Developer ID and notarized by Apple, so it opens normally. Some features use parts of
 > macOS that Apple doesn't document (keyboard light, built-in display brightness, what's playing); if a macOS update
 > changes them, those features turn themselves off.
 

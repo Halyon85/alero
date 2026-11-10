@@ -63,9 +63,8 @@ Bajá el último `Alero-x.y.z.zip` de [Releases](https://github.com/Halyon85/ale
 arrastrá `Alero.app` a Aplicaciones.
 
 > ⚠️ **Instalala bajo tu responsabilidad.** Alero es software libre y gratuito, sin ninguna garantía (ver la
-> [licencia](LICENSE)). Todavía no está firmada con un Developer ID de Apple, así que la primera vez macOS la bloquea:
-> abrí **Ajustes del Sistema → Privacidad y seguridad**, bajá hasta el final y tocá **Abrir igual** al lado de Alero. Se
-> hace una sola vez. Algunas funciones usan partes de macOS que Apple no documenta (luz del teclado, brillo de la
+> [licencia](LICENSE)). Desde la 0.1.5 está firmada con Developer ID y aprobada por Apple, así que abre normal.
+> Algunas funciones usan partes de macOS que Apple no documenta (luz del teclado, brillo de la
 > pantalla integrada, lo que está sonando): si una actualización de macOS las cambia, esas funciones se apagan solas.
 
 Si preferís no confiar en una descarga, compilala vos desde este código: tarda un minuto.
