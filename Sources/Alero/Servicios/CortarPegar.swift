@@ -106,7 +106,7 @@ final class CortarPegar {
         let codigo = evento.getIntegerValueField(.keyboardEventKeycode)
         if tipo == .keyUp { return tragadas.remove(codigo) != nil ? nil : sigue }
         guard tipo == .keyDown, evento.flags.intersection(Teclado.modificadores) == .maskCommand,
-              let letra = NSEvent(cgEvent: evento)?.charactersIgnoringModifiers?.lowercased(), letra == "x" || letra == "v" else { return sigue }
+              let letra = CortarPegar.letra(evento), letra == "x" || letra == "v" else { return sigue }
         // ⌘V sin nada cortado es el pegar de Finder de siempre (copia).
         if letra == "v" && !hayCortados && !tragadas.contains(codigo) { return sigue }
         tragadas.insert(codigo)
@@ -118,6 +118,17 @@ final class CortarPegar {
             if letra == "x" { self?.cortar(codigo: CGKeyCode(codigo), pid: pid) } else { self?.pegar(codigo: CGKeyCode(codigo), pid: pid) }
         }
         return nil
+    }
+
+    /// La letra que escribe la tecla, leída del propio evento. A propósito no se usa `NSEvent.charactersIgnoringModifiers`:
+    /// consulta la distribución del teclado, que macOS solo deja mirar desde el hilo principal, y acá (hilo de eventos)
+    /// cerraba la app de vez en cuando (09/11 y 11/11/2026). Con ⌘ apretada el evento ya trae la letra sola.
+    static func letra(_ evento: CGEvent) -> String? {
+        var largo = 0
+        var letras = [UniChar](repeating: 0, count: 4)
+        evento.keyboardGetUnicodeString(maxStringLength: letras.count, actualStringLength: &largo, unicodeString: &letras)
+        guard largo > 0 else { return nil }
+        return String(utf16CodeUnits: letras, count: min(largo, letras.count)).lowercased()
     }
 
     // MARK: - Cortar y pegar (main thread)

@@ -12,6 +12,9 @@ final class Ajustes: ObservableObject {
     @Published var notchActivo: Bool { didSet { guardar(notchActivo, "notch.activo") } }
     @Published var notchMusica: Bool { didSet { guardar(notchMusica, "notch.musica") } }
     @Published var notchCalendario: Bool { didSet { guardar(notchCalendario, "notch.calendario") } }
+    /// Los calendarios que la persona apagó (por su identificador de macOS). Se guardan los apagados y no los
+    /// prendidos, así un calendario nuevo aparece sin tener que venir a prenderlo.
+    @Published var calendariosOcultos: [String] { didSet { guardar(calendariosOcultos, "notch.calendariosOcultos") } }
     /// Reemplaza los carteles de volumen y brillo de macOS por los del notch. Necesita Accesibilidad.
     @Published var notchTeclas: Bool { didSet { guardar(notchTeclas, "notch.teclas") } }
     @Published var notchEstante: Bool { didSet { guardar(notchEstante, "notch.estante") } }
@@ -165,6 +168,7 @@ final class Ajustes: ObservableObject {
         notchActivo = guardado.bool(forKey: "notch.activo")
         notchMusica = guardado.bool(forKey: "notch.musica")
         notchCalendario = guardado.bool(forKey: "notch.calendario")
+        calendariosOcultos = guardado.stringArray(forKey: "notch.calendariosOcultos") ?? []
         notchTeclas = guardado.bool(forKey: "notch.teclas")
         notchEstante = guardado.bool(forKey: "notch.estante")
         notchAtajos = guardado.bool(forKey: "notch.atajos")

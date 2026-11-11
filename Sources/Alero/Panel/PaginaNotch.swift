@@ -6,6 +6,7 @@ import SwiftUI
 
 struct PaginaNotch: View {
     @ObservedObject private var ajustes = Ajustes.shared
+    @ObservedObject private var calendario = Calendario.shared
 
     private struct Demora: Identifiable, Hashable {
         let segundos: Double
@@ -80,6 +81,25 @@ struct PaginaNotch: View {
             FilaLlave(titulo: T("Calendario", "Calendar"),
                       detalle: T("Tus próximas reuniones y un aviso 5 minutos antes.", "Your next meetings and a heads-up 5 minutes before."),
                       valor: $ajustes.notchCalendario)
+            if ajustes.notchCalendario && !calendario.calendarios.isEmpty {
+                Fila(titulo: T("Qué calendarios se muestran", "Which calendars to show"),
+                     detalle: T("Si un evento te aparece repetido, es porque está en dos calendarios: apagá uno.",
+                                "If an event shows up twice, it's in two calendars: turn one off.")) { EmptyView() }
+                ForEach(calendario.calendarios) { uno in
+                    HStack(spacing: 10) {
+                        Circle().fill(uno.color).frame(width: 8, height: 8)
+                        Text(uno.titulo).font(.system(size: 13)).foregroundStyle(Tema.titulo).lineLimit(1)
+                        Text(uno.cuenta).font(.system(size: 12)).foregroundStyle(Tema.apagado).lineLimit(1)
+                        Spacer(minLength: 8)
+                        Toggle("", isOn: Binding(get: { !ajustes.calendariosOcultos.contains(uno.id) },
+                                                 set: { calendario.mostrar(uno.id, $0) }))
+                            .toggleStyle(.switch).controlSize(.small).labelsHidden().tint(Tema.acentoVentana)
+                            .accessibilityLabel("\(uno.titulo), \(uno.cuenta)")
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 6)
+                }
+                Rectangle().fill(Tema.bordeSuave).frame(height: 1).padding(.leading, 16).padding(.top, 6)
+            }
             FilaLlave(titulo: T("Estante", "Shelf"),
                       detalle: T("Aparece cuando acercás un archivo al notch.", "Shows up when you bring a file to the notch."),
                       divisor: false, valor: $ajustes.notchEstante)

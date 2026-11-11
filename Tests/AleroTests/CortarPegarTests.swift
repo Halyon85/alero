@@ -69,4 +69,21 @@ final class CortarPegarTests: XCTestCase {
         XCTAssertTrue(MoverArchivos.esDePermiso(posix))
         XCTAssertFalse(MoverArchivos.esDePermiso(NSError(domain: NSCocoaErrorDomain, code: NSFileNoSuchFileError)))
     }
+
+    // La letra de ⌘X y ⌘V se lee del propio evento, sin preguntarle al teclado de macOS: eso solo se puede en el hilo
+    // principal y, desde el hilo de eventos, cerraba la app de vez en cuando (09/11 y 11/11/2026). Se prueba acá desde
+    // otro hilo, como corre de verdad.
+    func testLaLetraSeLeeDelEventoDesdeCualquierHilo() {
+        let listo = expectation(description: "leída fuera del hilo principal")
+        DispatchQueue.global().async {
+            for (texto, esperada) in [("x", "x"), ("V", "v")] {
+                guard let evento = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true) else { continue }
+                let letras = Array(texto.utf16)
+                evento.keyboardSetUnicodeString(stringLength: letras.count, unicodeString: letras)
+                XCTAssertEqual(CortarPegar.letra(evento), esperada)
+            }
+            listo.fulfill()
+        }
+        wait(for: [listo], timeout: 5)
+    }
 }

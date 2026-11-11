@@ -12,7 +12,9 @@ enum PermisoAudio {
 
     private static let servicio = "kTCCServiceAudioCapture" as CFString
     private typealias Preguntar = @convention(c) (CFString, CFDictionary?) -> Int32
-    private typealias Pedir = @convention(c) (CFString, CFDictionary?, @convention(block) (Bool) -> Void) -> Void
+    // `@escaping`: macOS guarda el bloque y lo llama cuando la persona contesta el cartel. Sin eso Swift lo toma como
+    // un bloque que no sale de la llamada y cierra la app al volver (pasó el 10/11/2026 al tocar "Dar permiso").
+    private typealias Pedir = @convention(c) (CFString, CFDictionary?, @escaping @convention(block) (Bool) -> Void) -> Void
 
     private static let biblioteca = dlopen("/System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC", RTLD_LAZY)
     private static let preguntar: Preguntar? = simbolo("TCCAccessPreflight")

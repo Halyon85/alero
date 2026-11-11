@@ -1,10 +1,12 @@
 import Foundation
 import Security
 
-// Qué app se puede desinstalar y qué cuenta como resto suyo. Los restos se buscan solo por identificadores que la app
-// declara (el suyo y los de sus extensiones y ayudantes) y por los grupos de su firma; nunca por el nombre visible
-// ("Slack", "Google"): un nombre lo puede compartir otra app y se borraría de más. Las carpetas sensibles (las que
-// arrancan programas o guardan los datos de la app) solo aceptan el identificador exacto. Lo que está en `/Library`
+// Qué app se puede desinstalar y qué cuenta como resto suyo. Los restos se buscan por identificadores que la app
+// declara (el suyo y los de sus extensiones y ayudantes) y por los grupos de su firma. Desde el 11/11/2026 también por
+// el nombre exacto de la app, pero solo en carpetas de datos, cachés, registros e informes de errores (`porNombre`):
+// muchas apps guardan ahí lo más pesado ("Application Support/Slack") y antes quedaba. Un nombre lo puede compartir
+// otra app: si pasa, esos restos se muestran sin tildar. Las carpetas sensibles (las que arrancan programas o guardan
+// las preferencias) solo aceptan el identificador exacto, nunca el nombre. Lo que está en `/Library`
 // (agentes y ayudantes del sistema) y los recibos del instalador solo se informan: moverlos pide administrador.
 // Se prueba en `DesinstaladorTests` con apps de mentira en una carpeta temporal.
 
@@ -24,6 +26,8 @@ struct AppElegida: Equatable {
     /// Etiquetas de sus ayudantes con permisos de administrador (`SMPrivilegedExecutables` y lo que trae en
     /// `Contents/Library/LaunchServices`): al instalarse quedan en `/Library/PrivilegedHelperTools` y `LaunchDaemons`.
     var ayudantes: [String] = []
+    /// Cómo se llama la app (el archivo sin ".app", su nombre visible y su ejecutable), para los restos por nombre.
+    var nombres: [String] = []
 }
 
 enum RechazoApp: Error, Equatable {
@@ -48,6 +52,8 @@ enum RechazoApp: Error, Equatable {
 enum CarpetaRestos: String, CaseIterable, Identifiable {
     case soporte, caches, preferencias, porEquipo, contenedores, grupos, estado, almacenHTTP, webKit, agentes, registros, cookies, scripts
     case autoguardado
+    // Informes de errores: archivos que empiezan con el nombre de la app ("Slack_<id>.plist", "Slack-2026-….ips").
+    case informes, diagnosticos
     // En `/Library`: son de todas las cuentas y moverlos pide administrador. Solo se listan.
     case agentesSistema, demoniosSistema, ayudantesSistema, soporteSistema, preferenciasSistema
 
@@ -81,6 +87,8 @@ enum CarpetaRestos: String, CaseIterable, Identifiable {
         case .cookies: return "Cookies"
         case .scripts: return "Application Scripts"
         case .autoguardado: return "Autosave Information"
+        case .informes: return "Application Support/CrashReporter"
+        case .diagnosticos: return "Logs/DiagnosticReports"
         case .agentesSistema: return "LaunchAgents"
         case .demoniosSistema: return "LaunchDaemons"
         case .ayudantesSistema: return "PrivilegedHelperTools"
@@ -102,6 +110,7 @@ enum CarpetaRestos: String, CaseIterable, Identifiable {
         case .registros: return T("Registros", "Logs")
         case .scripts: return T("Scripts", "Scripts")
         case .autoguardado: return T("Autoguardado", "Autosave")
+        case .informes, .diagnosticos: return T("Informes de errores", "Crash reports")
         case .agentesSistema: return T("Agente de la Mac", "System agent")
         case .demoniosSistema: return T("Servicio de la Mac", "System daemon")
         case .ayudantesSistema: return T("Ayudante con permisos", "Privileged helper")
@@ -115,6 +124,14 @@ enum CarpetaRestos: String, CaseIterable, Identifiable {
         switch self {
         case .preferencias, .porEquipo, .contenedores, .grupos, .agentes, .scripts: return true
         default: return enSistema
+        }
+    }
+
+    /// Las carpetas donde también vale el nombre de la app: datos, cachés, registros e informes. Nunca las sensibles.
+    var porNombre: Bool {
+        switch self {
+        case .soporte, .caches, .registros, .webKit, .almacenHTTP, .informes, .diagnosticos: return true
+        default: return false
         }
     }
 
@@ -168,7 +185,7 @@ enum ReglasApp {
         return .success(AppElegida(url: url, identificador: identificador, nombre: nombre,
                                    version: info["CFBundleShortVersionString"] as? String,
                                    identidadApp: identidad, identidadPlist: identidadPlist, identificadores: ids,
-                                   ayudantes: ayudantesPrivilegiados(url, info: info)))
+                                   ayudantes: ayudantesPrivilegiados(url, info: info), nombres: nombresDe(url, info: info)))
     }
 
     /// Justo antes de desinstalar: la app tiene que ser la misma que se eligió (ni reemplazada, ni cambiada por un
@@ -267,6 +284,48 @@ enum ReglasApp {
         if ids.contains(id) { return true }
         guard !carpeta.sensible, ReglasLimpieza.pareceIdentificador(id) else { return false }
         return ids.contains { id.hasPrefix($0 + ".") }
+    }
+
+    /// Nombres demasiado comunes para buscar por ellos: carpetas de fabricantes (adentro hay cosas de varias apps) y
+    /// palabras genéricas.
+    private static let nombresComunes: Set<String> = [
+        "google", "microsoft", "adobe", "apple", "mozilla", "jetbrains", "electron", "helper", "app", "application",
+        "update", "updater", "cache", "caches", "logs", "data", "temp", "tmp", "default", "user", "shared", "common",
+        "crashreporter", "diagnosticreports", "java", "python", "node", "desktop", "launcher", "installer", "setup",
+    ]
+
+    /// Los nombres de la app que sirven para buscar restos: el archivo sin ".app", el nombre visible y el ejecutable.
+    /// En minúsculas, sin repetir, de 3 letras o más y sin los demasiado comunes. Lo usa `validar`.
+    static func nombresDe(_ app: URL, info: [String: Any]) -> [String] {
+        let crudos = [app.deletingPathExtension().lastPathComponent, info["CFBundleName"] as? String,
+                      info["CFBundleDisplayName"] as? String, info["CFBundleExecutable"] as? String]
+        var nombres: [String] = []
+        for crudo in crudos {
+            guard let nombre = crudo?.trimmingCharacters(in: .whitespaces).lowercased(), nombre.count >= 3,
+                  !nombre.contains("/"), !nombre.hasPrefix("."), !nombresComunes.contains(nombre),
+                  !nombres.contains(nombre) else { continue }
+            nombres.append(nombre)
+        }
+        return nombres
+    }
+
+    /// Si `nombre` (un hijo de `carpeta`) es de la app por cómo se llama. Solo en las carpetas `porNombre`. En datos,
+    /// cachés y registros el nombre tiene que ser exactamente el de la app ("Slack"); en los informes de errores, el
+    /// archivo empieza con el nombre y sigue con lo que le agrega macOS ("Slack_<id>.plist", "Slack-2026-11-11-….ips").
+    static func esPorNombre(_ nombre: String, en carpeta: CarpetaRestos, nombres: [String]) -> Bool {
+        guard carpeta.porNombre, !nombres.isEmpty else { return false }
+        let archivo = nombre.lowercased()
+        switch carpeta {
+        case .informes:
+            guard archivo.hasSuffix(".plist") else { return false }
+            return nombres.contains { archivo.hasPrefix($0 + "_") }
+        case .diagnosticos:
+            guard [".ips", ".crash", ".diag", ".hang", ".spin"].contains(where: archivo.hasSuffix) else { return false }
+            // Después del nombre viene la fecha ("-2026-…" o "_2026-…"): así "Notas" no se lleva lo de "Notas Pro".
+            return nombres.contains { archivo.hasPrefix($0 + "-20") || archivo.hasPrefix($0 + "_20") }
+        default:
+            return nombres.contains(archivo)
+        }
     }
 
     /// Un LaunchAgent (o LaunchDaemon) es de la app si su etiqueta es un identificador de la app (o de un ayudante

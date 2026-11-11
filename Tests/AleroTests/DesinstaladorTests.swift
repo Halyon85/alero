@@ -133,7 +133,7 @@ final class DesinstaladorTests: XCTestCase {
         elegida.grupos = ["AB12CD34EF.com.foo.compartido"]
         let lib = "casa/Library/"
         try c.archivo(lib + "Application Support/com.foo.Notas/base.db")
-        try c.archivo(lib + "Application Support/Notas/base.db")              // por nombre visible: no
+        try c.archivo(lib + "Application Support/Notas/base.db")              // por el nombre exacto de la app: sí
         try c.archivo(lib + "Caches/com.foo.Notas.ShipIt/x")
         try c.archivo(lib + "Caches/com.foo.NotasPro/x")                      // otra app
         try c.archivo(lib + "Preferences/com.foo.Notas.plist")
@@ -153,7 +153,7 @@ final class DesinstaladorTests: XCTestCase {
 
         let restos = BuscadorRestos.buscar(elegida, home: c.ruta("casa"), sistema: c.ruta("sistema"), otraCopia: false, cancelacion: Cancelacion())
         XCTAssertEqual(Set(restos.map(\.nombre)), [
-            "com.foo.Notas", "com.foo.Notas.ShipIt", "com.foo.Notas.plist",
+            "com.foo.Notas", "Notas", "com.foo.Notas.ShipIt", "com.foo.Notas.plist",
             "com.foo.Notas.8D1E4F2A-1111-2222-3333-444455556666.plist", "com.foo.Notas.Compartir",
             "AB12CD34EF.com.foo.compartido", "com.foo.Notas.savedState", "com.foo.Notas.ayudante.plist",
         ])
@@ -326,5 +326,61 @@ final class DesinstaladorTests: XCTestCase {
         let terminado = ModeloDesinstalador.muestraVariasTerminado()
         XCTAssertEqual(terminado.appsMovidas, 3)
         XCTAssertTrue(terminado.restos.isEmpty)
+    }
+
+    // Restos por nombre (11/11/2026): antes solo se buscaba por identificador y quedaban las carpetas de datos más
+    // pesadas ("Application Support/Slack") y los informes de errores.
+    func testRestosPorElNombreDeLaApp() throws {
+        let url = try app("Applications/Notas.app", id: "com.foo.Notas")
+        guard case .success(let elegida) = ReglasApp.validar(url, propio: "x.y", rutaPropia: "/nada") else { return XCTFail() }
+        XCTAssertEqual(elegida.nombres, ["notas"])
+        let lib = "casa/Library/"
+        try c.archivo(lib + "Application Support/Notas/base.db")
+        try c.archivo(lib + "Caches/notas/x")
+        try c.archivo(lib + "Logs/Notas/hoy.log")
+        try c.archivo(lib + "Application Support/CrashReporter/Notas_F3C109A2-7FB2.plist")
+        try c.archivo(lib + "Logs/DiagnosticReports/Notas-2026-11-11-090157.ips")
+        // Parecidos que no son: otra app, otro tipo de archivo y carpetas sensibles (ahí nunca vale el nombre).
+        try c.archivo(lib + "Application Support/Notas Pro/base.db")
+        try c.archivo(lib + "Application Support/CrashReporter/Notas Pro_F3C1.plist")
+        try c.archivo(lib + "Logs/DiagnosticReports/Notas Pro-2026-11-11-090157.ips")
+        try c.archivo(lib + "Logs/DiagnosticReports/Notas-apuntes.txt")
+        try c.archivo(lib + "Preferences/Notas.plist")
+        try c.archivo(lib + "Containers/Notas/Data/x")
+
+        let restos = BuscadorRestos.buscar(elegida, home: c.ruta("casa"), sistema: c.ruta("sistema"), otraCopia: false, cancelacion: Cancelacion())
+        XCTAssertEqual(Set(restos.map { $0.carpeta.ruta + "/" + $0.nombre }), [
+            "Application Support/Notas", "Caches/notas", "Logs/Notas",
+            "Application Support/CrashReporter/Notas_F3C109A2-7FB2.plist", "Logs/DiagnosticReports/Notas-2026-11-11-090157.ips",
+        ])
+        XCTAssertTrue(restos.allSatisfy { $0.elegido && $0.nota != nil })
+        for resto in restos { XCTAssertNil(ReglasBorrado.revisar(resto.elemento, home: c.ruta("casa")), resto.nombre) }
+        // Si otra app instalada se llama igual, se muestran pero sin tildar.
+        let compartido = BuscadorRestos.buscar(elegida, home: c.ruta("casa"), sistema: c.ruta("sistema"), otraCopia: false,
+                                               nombreCompartido: true, cancelacion: Cancelacion())
+        XCTAssertEqual(compartido.count, 5)
+        XCTAssertTrue(compartido.allSatisfy { !$0.elegido })
+    }
+
+    func testNombresDemasiadoComunesNoSeBuscan() {
+        let url = URL(fileURLWithPath: "/Applications/Google.app")
+        XCTAssertEqual(ReglasApp.nombresDe(url, info: ["CFBundleName": "Helper", "CFBundleExecutable": "ab"]), [])
+        let chrome = URL(fileURLWithPath: "/Applications/Google Chrome.app")
+        XCTAssertEqual(ReglasApp.nombresDe(chrome, info: ["CFBundleName": "Chrome", "CFBundleExecutable": "Google Chrome"]),
+                       ["google chrome", "chrome"])
+        XCTAssertFalse(ReglasApp.esPorNombre("Google", en: .soporte, nombres: ["google chrome", "chrome"]))
+        XCTAssertFalse(ReglasApp.esPorNombre("Chrome", en: .preferencias, nombres: ["chrome"]))
+    }
+
+    func testNombresDeLasDemasAppsInstaladas() throws {
+        let elegida = try app("Applications/Notas.app", id: "com.foo.Notas")
+        let carpeta = elegida.deletingLastPathComponent().path
+        // Sola, su nombre no cuenta como de otra app.
+        XCTAssertFalse(ModeloDesinstalador.nombresInstalados(menos: [elegida.path], carpetas: [carpeta]).contains("notas"))
+        // Con otra app que se llama igual en otra carpeta de Aplicaciones, sí.
+        let otra = try app("Otras/Notas.app", id: "com.otra.Notas")
+        let ajenos = ModeloDesinstalador.nombresInstalados(menos: [elegida.path], carpetas: [carpeta, otra.deletingLastPathComponent().path])
+        XCTAssertTrue(ajenos.contains("notas"))
+        XCTAssertTrue(ModeloDesinstalador.nombresInstalados(menos: [], carpetas: [c.ruta("no-existe")]).isEmpty)
     }
 }

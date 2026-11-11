@@ -26,4 +26,12 @@ final class CalendarioTests: XCTestCase {
         let avisar = Calendario.porAvisar(eventos, avisados: ["ya avisado"], ahora: ahora, prendido: true)
         XCTAssertEqual(avisar.map(\.id), ["pronto"])
     }
+
+    // Elegir calendarios (11/11/2026): un evento que está en dos calendarios aparecía dos veces y no había cómo sacar uno.
+    func testLosCalendariosApagadosNoSeMuestran() {
+        XCTAssertTrue(Calendario.seMuestra("google", ocultos: []))
+        XCTAssertFalse(Calendario.seMuestra("icloud", ocultos: ["icloud"]))
+        XCTAssertTrue(Calendario.seMuestra("google", ocultos: ["icloud"]))
+        XCTAssertTrue(Calendario.seMuestra(nil, ocultos: ["icloud"]))
+    }
 }

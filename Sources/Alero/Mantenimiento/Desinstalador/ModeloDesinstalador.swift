@@ -182,9 +182,14 @@ final class ModeloDesinstalador: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var preparadas: [AppPreparada] = []
             var vistos = Set<String>()
+            // Los nombres de las demás apps instaladas (las que no se eligieron): si una se llama igual que una
+            // elegida, lo encontrado por nombre puede ser de ella y va sin tildar.
+            let ajenos = ModeloDesinstalador.nombresInstalados(menos: rutas)
             for (elegida, otraCopia) in zip(aceptadas, otrasCopias) {
                 if cancelacion.activa { return }
-                var preparada = ModeloDesinstalador.preparar(elegida, otraCopia: otraCopia, cancelacion: cancelacion)
+                let compartido = elegida.nombres.contains(where: ajenos.contains)
+                var preparada = ModeloDesinstalador.preparar(elegida, otraCopia: otraCopia, nombreCompartido: compartido,
+                                                             cancelacion: cancelacion)
                 // Dos copias de la misma app elegidas juntas comparten restos: cada uno aparece una sola vez.
                 preparada.restos.removeAll { vistos.contains($0.id) }
                 vistos.formUnion(preparada.restos.map(\.id))
@@ -199,14 +204,34 @@ final class ModeloDesinstalador: ObservableObject {
         }
     }
 
+    /// Los nombres (como los de `ReglasApp.nombresDe`) de las apps instaladas en las carpetas de Aplicaciones, sin
+    /// contar las de `menos` (las elegidas). Solo lee cada Info.plist. Fuera del hilo principal.
+    static func nombresInstalados(menos: Set<String>, carpetas: [String]? = nil) -> Set<String> {
+        let lugares = carpetas ?? ["/Applications", "/Applications/Utilities", ReglasBorrado.casa + "/Applications"]
+        var nombres = Set<String>()
+        for lugar in lugares {
+            let hijos = (try? FileManager.default.contentsOfDirectory(atPath: lugar)) ?? []
+            for hijo in hijos where hijo.lowercased().hasSuffix(".app") {
+                let url = URL(fileURLWithPath: lugar, isDirectory: true).appendingPathComponent(hijo)
+                guard !menos.contains(url.path),
+                      let datos = try? Data(contentsOf: url.appendingPathComponent("Contents/Info.plist")),
+                      let info = try? PropertyListSerialization.propertyList(from: datos, format: nil) as? [String: Any] else { continue }
+                nombres.formUnion(ReglasApp.nombresDe(url, info: info))
+            }
+        }
+        return nombres
+    }
+
     /// Firma, tamaño, restos y recibos de una app. Fuera del hilo principal.
-    private static func preparar(_ elegida: AppElegida, otraCopia: Bool, cancelacion: Cancelacion) -> AppPreparada {
+    private static func preparar(_ elegida: AppElegida, otraCopia: Bool, nombreCompartido: Bool,
+                                 cancelacion: Cancelacion) -> AppPreparada {
         var app = elegida
         let firma = ReglasApp.firma(app.url)
         app.equipo = firma.equipo
         app.grupos = firma.grupos
         let tamano = Papelera.tamano(app.url, cancelacion: cancelacion)
-        let restos = BuscadorRestos.buscar(app, home: ReglasBorrado.casa, otraCopia: otraCopia, cancelacion: cancelacion)
+        let restos = BuscadorRestos.buscar(app, home: ReglasBorrado.casa, otraCopia: otraCopia,
+                                           nombreCompartido: nombreCompartido, cancelacion: cancelacion)
         return AppPreparada(app: app, tamano: tamano, restos: restos, recibos: BuscadorRestos.recibos(app))
     }
 

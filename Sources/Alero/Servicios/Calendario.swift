@@ -17,6 +17,15 @@ struct Evento: Identifiable, Equatable {
     let enlace: URL?
 }
 
+/// Un calendario de la Mac, para elegir en Ajustes cuáles se muestran.
+struct CalendarioDisponible: Identifiable, Equatable {
+    let id: String
+    let titulo: String
+    /// La cuenta de donde viene (iCloud, Google…).
+    let cuenta: String
+    let color: Color
+}
+
 final class Calendario: ObservableObject {
     static let shared = Calendario()
 
@@ -24,6 +33,8 @@ final class Calendario: ObservableObject {
 
     @Published private(set) var eventos: [Evento] = []
     @Published private(set) var permiso: Permiso = .sinPedir
+    /// Todos los calendarios de la Mac, ordenados por cuenta y nombre. Lo muestra Alero › Notch para elegir.
+    @Published private(set) var calendarios: [CalendarioDisponible] = []
 
     /// Se llama 5 minutos antes de un evento con hora (una sola vez por evento).
     var alAcercarse: ((Evento) -> Void)?
@@ -107,22 +118,44 @@ final class Calendario: ObservableObject {
         guard permiso == .concedido else { return }
         // Se toma acá, en el hilo principal: si se creara recién dentro de la cola, dos hilos podrían crearlo a la vez.
         let almacen = self.almacen
+        let ocultos = Set(Ajustes.shared.calendariosOcultos)
         cola.async { [weak self] in
             guard let self else { return }
             let ahora = Date()
             let calendario = Foundation.Calendar.current
             let finDeManana = calendario.date(byAdding: .day, value: 2, to: calendario.startOfDay(for: ahora)) ?? ahora.addingTimeInterval(172_800)
+            let todos = almacen.calendars(for: .event)
+            let disponibles = todos.map {
+                CalendarioDisponible(id: $0.calendarIdentifier, titulo: $0.title, cuenta: $0.source?.title ?? "", color: Color(cgColor: $0.cgColor))
+            }.sorted { ($0.cuenta, $0.titulo) < ($1.cuenta, $1.titulo) }
             let filtro = almacen.predicateForEvents(withStart: ahora, end: finDeManana, calendars: nil)
             let leidos = almacen.events(matching: filtro)
                 .filter { $0.endDate > ahora && $0.status != .canceled }
+                .filter { Calendario.seMuestra($0.calendar?.calendarIdentifier, ocultos: ocultos) }
                 .sorted { $0.startDate < $1.startDate }
                 .prefix(6)
                 .map(Calendario.evento(de:))
             DispatchQueue.main.async {
+                if self.calendarios != disponibles { self.calendarios = disponibles }
                 self.eventos = Array(leidos)
                 self.programarReloj()
             }
         }
+    }
+
+    /// Si los eventos de ese calendario se muestran: todos menos los que la persona apagó. Un evento sin calendario
+    /// (no debería pasar) se muestra. Sin estado: se prueba en `CalendarioTests`.
+    static func seMuestra(_ calendario: String?, ocultos: Set<String>) -> Bool {
+        guard let calendario else { return true }
+        return !ocultos.contains(calendario)
+    }
+
+    /// Prende o apaga un calendario y relee los eventos. Lo llama Alero › Notch. Hilo principal.
+    func mostrar(_ id: String, _ visible: Bool) {
+        var ocultos = Ajustes.shared.calendariosOcultos.filter { $0 != id }
+        if !visible { ocultos.append(id) }
+        Ajustes.shared.calendariosOcultos = ocultos
+        recargar()
     }
 
     // Un solo reloj: al próximo "5 minutos antes", inicio o fin, lo que llegue primero. Ahí se relee todo.
