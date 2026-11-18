@@ -52,6 +52,7 @@ final class Delegado: NSObject, NSApplicationDelegate {
         CortarPegar.shared.arrancar()
         Capturador.shared.arrancar()
         Actualizaciones.arrancar()
+        InicioSesion.revisar()
         if !UserDefaults.standard.bool(forKey: "app.yaAbrio") {
             UserDefaults.standard.set(true, forKey: "app.yaAbrio")
             VentanaAlero.shared.mostrar()

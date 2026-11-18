@@ -78,6 +78,7 @@ struct PaginaGeneral: View {
             errorInicio = T("No se pudo cambiar: \(error.localizedDescription)", "Couldn't change it: \(error.localizedDescription)")
         }
         alIniciar = SMAppService.mainApp.status == .enabled
+        if errorInicio == nil { InicioSesion.anotar(prendido: alIniciar) }
     }
 }
 
